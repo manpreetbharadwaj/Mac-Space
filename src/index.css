@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Helvetica, Arial,
+    sans-serif;
+
+  --color-canvas: #f3f4f6;
+  --color-surface: #ffffff;
+  --color-surface-2: #eef0f3;
+  --color-surface-hover: #e6e8ec;
+  --color-border: #e3e5ea;
+  --color-border-strong: #d3d6dd;
+  --color-text: #17181c;
+  --color-text-muted: #6b7280;
+  --color-text-faint: #9aa0ac;
+  --color-sidebar: #eaecf0;
+
+  --color-accent: #0a7cff;
+  --color-accent-soft: #e5f1ff;
+  --color-accent-contrast: #ffffff;
+
+  --color-safe: #1f9254;
+  --color-safe-soft: #e5f6ec;
+  --color-review: #c2760a;
+  --color-review-soft: #fbf0dc;
+  --color-protected: #d33b30;
+  --color-protected-soft: #fbe7e5;
+}
+
+.dark {
+  --color-canvas: #15161b;
+  --color-surface: #1c1d23;
+  --color-surface-2: #24252d;
+  --color-surface-hover: #2b2c36;
+  --color-border: #2c2d36;
+  --color-border-strong: #3a3c48;
+  --color-text: #f1f1f3;
+  --color-text-muted: #a2a3ad;
+  --color-text-faint: #6d6e78;
+  --color-sidebar: #191a20;
+
+  --color-accent: #3f9dff;
+  --color-accent-soft: #17263b;
+  --color-accent-contrast: #04101f;
+
+  --color-safe: #38c172;
+  --color-safe-soft: #142a1e;
+  --color-review: #e2a13d;
+  --color-review-soft: #2f2517;
+  --color-protected: #f2574c;
+  --color-protected-soft: #351b19;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::selection {
+  background: var(--color-accent);
+  color: white;
+}
+
+button {
+  font-family: inherit;
+}

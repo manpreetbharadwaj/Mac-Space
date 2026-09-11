@@ -1,0 +1,170 @@
+use crate::dto::{
+    FullScanResultDto, PathAccessDto, ScanProgressEvent, ScanWarningDto, ScannedFileDto,
+};
+use crate::{applications, browsers, dedup, developer, disk, scanner};
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::{AppHandle, Emitter};
+
+const PROGRESS_EVENT: &str = "scan-progress";
+
+fn emit_progress(app: &AppHandle, phase: &str, label: &str, done: bool) {
+    let _ = app.emit(
+        PROGRESS_EVENT,
+        ScanProgressEvent {
+            phase: phase.to_string(),
+            label: label.to_string(),
+            done,
+        },
+    );
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+#[tauri::command]
+pub fn get_system_overview() -> crate::dto::SystemOverviewDto {
+    disk::get_system_overview()
+}
+
+#[tauri::command]
+pub fn check_path_access(path: String) -> PathAccessDto {
+    let state = scanner::path_access_state(Path::new(&path));
+    PathAccessDto {
+        path,
+        state: state.to_string(),
+    }
+}
+
+#[tauri::command]
+pub fn reveal_in_finder(path: String) -> Result<(), String> {
+    std::process::Command::new("open")
+        .args(["-R", &path])
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// Opens System Settings' Full Disk Access pane. We cannot grant this
+/// permission programmatically — only the user can, in System Settings — so
+/// this just takes them straight there instead of silently failing.
+#[tauri::command]
+pub fn open_full_disk_access_settings() -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+fn scan_all_files(home: &PathBuf) -> (Vec<ScannedFileDto>, Vec<ScanWarningDto>) {
+    let mut files = Vec::new();
+    let mut warnings = Vec::new();
+
+    let file_roots: &[(&str, &str, u64, usize, usize)] = &[
+        // (relative path, root label, min size bytes, max depth, max results)
+        ("Downloads", "downloads", 1024 * 1024, 8, 500),
+        ("Desktop", "desktop", 1024 * 1024, 8, 300),
+        ("Documents", "documents", 1024 * 1024, 10, 500),
+    ];
+
+    for (relative, label, min_size, max_depth, max_results) in file_roots {
+        let root = home.join(relative);
+        let (found, warning) =
+            scanner::scan_candidate_files(&root, label, *max_depth, *min_size, *max_results);
+        files.extend(found);
+        if let Some(w) = warning {
+            warnings.push(w);
+        }
+    }
+
+    let cache_roots: &[(&str, &str, u64, usize)] = &[
+        ("Library/Caches", "system-caches", 5 * 1024 * 1024, 60),
+        ("Library/Logs", "system-logs", 2 * 1024 * 1024, 40),
+    ];
+
+    for (relative, label, min_size, max_results) in cache_roots {
+        let root = home.join(relative);
+        let (found, warning) = scanner::scan_top_level_sizes(&root, label, *min_size, *max_results);
+        files.extend(found);
+        if let Some(w) = warning {
+            warnings.push(w);
+        }
+    }
+
+    (files, warnings)
+}
+
+/// Phase order intentionally matches the existing Scan screen's fixed step
+/// list (Analyzing storage → Developer data → Browsers → Applications →
+/// Downloads & files → Building recommendations) so that UI is never
+/// redesigned — only the timing driving it becomes real.
+#[tauri::command]
+pub async fn run_full_scan(app: AppHandle) -> Result<FullScanResultDto, String> {
+    let home = dirs::home_dir().ok_or_else(|| "Could not determine home directory".to_string())?;
+
+    emit_progress(&app, "overview", "Analyzing storage…", false);
+    let overview = disk::get_system_overview();
+
+    emit_progress(&app, "developer", "Scanning developer tooling…", false);
+    let home_for_dev = home.clone();
+    let developer_items = tauri::async_runtime::spawn_blocking(move || {
+        developer::scan_developer_storage(&home_for_dev)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    emit_progress(&app, "browsers", "Scanning browser caches…", false);
+    let home_for_browsers = home.clone();
+    let browser_items = tauri::async_runtime::spawn_blocking(move || {
+        browsers::scan_browser_storage(&home_for_browsers)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    emit_progress(&app, "applications", "Scanning installed applications…", false);
+    let home_for_apps = home.clone();
+    let application_items = tauri::async_runtime::spawn_blocking(move || {
+        applications::scan_applications(&home_for_apps)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    emit_progress(&app, "files", "Scanning Downloads, Desktop & Documents…", false);
+    let home_for_files = home.clone();
+    let (files, warnings) = tauri::async_runtime::spawn_blocking(move || scan_all_files(&home_for_files))
+        .await
+        .map_err(|e| e.to_string())?;
+    let files = tauri::async_runtime::spawn_blocking(move || {
+        let mut files = files;
+        dedup::mark_duplicate_candidates(&mut files);
+        files
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    emit_progress(&app, "finalizing", "Calculating reclaimable storage…", true);
+
+    log::info!(
+        "run_full_scan complete: {} files, {} developer items, {} browsers, {} applications, {} warnings",
+        files.len(),
+        developer_items.len(),
+        browser_items.len(),
+        application_items.len(),
+        warnings.len(),
+    );
+
+    Ok(FullScanResultDto {
+        overview,
+        files,
+        developer: developer_items,
+        browsers: browser_items,
+        applications: application_items,
+        warnings,
+        scanned_at_ms: now_ms(),
+    })
+}

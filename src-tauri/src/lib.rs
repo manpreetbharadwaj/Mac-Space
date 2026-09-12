@@ -21,6 +21,8 @@ pub fn run() {
             }
             Ok(())
         })
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             commands::get_system_overview,
             commands::check_path_access,

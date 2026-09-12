@@ -9,6 +9,7 @@ export function Modal({
   children,
   footer,
   width = 'md',
+  dismissible = true,
 }: {
   open: boolean
   onClose: () => void
@@ -16,6 +17,8 @@ export function Modal({
   children: ReactNode
   footer?: ReactNode
   width?: 'sm' | 'md' | 'lg'
+  /** Set false for blocking flows (e.g. a mandatory app update) — hides the close button and ignores backdrop clicks. */
+  dismissible?: boolean
 }) {
   const widthClass = { sm: 'max-w-md', md: 'max-w-xl', lg: 'max-w-2xl' }[width]
 
@@ -27,7 +30,7 @@ export function Modal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          onClick={onClose}
+          onClick={dismissible ? onClose : undefined}
         >
           <motion.div
             className={`w-full ${widthClass} overflow-hidden rounded-2xl border border-border bg-surface shadow-xl`}
@@ -39,12 +42,14 @@ export function Modal({
           >
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
               <h2 className="text-[15px] font-semibold text-text">{title}</h2>
-              <button
-                onClick={onClose}
-                className="flex h-7 w-7 items-center justify-center rounded-full text-text-muted hover:bg-surface-2 hover:text-text"
-              >
-                <X size={16} />
-              </button>
+              {dismissible && (
+                <button
+                  onClick={onClose}
+                  className="flex h-7 w-7 items-center justify-center rounded-full text-text-muted hover:bg-surface-2 hover:text-text"
+                >
+                  <X size={16} />
+                </button>
+              )}
             </div>
             <div className="max-h-[70vh] overflow-y-auto px-5 py-4">{children}</div>
             {footer && <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4">{footer}</div>}

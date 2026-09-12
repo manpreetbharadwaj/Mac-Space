@@ -1,10 +1,12 @@
 import { useState } from 'react'
-import { Moon, Sun, Monitor, ShieldAlert, X, RotateCcw } from 'lucide-react'
+import { Moon, Sun, Monitor, ShieldAlert, X, RotateCcw, RefreshCw, CheckCircle2, AlertTriangle } from 'lucide-react'
 import { clsx } from 'clsx'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { useAppStore } from '@/store/useAppStore'
+import { useUpdateStore } from '@/store/useUpdateStore'
+import { formatDateTime } from '@/lib/format'
 import type { ThemePreference } from '@/types'
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
@@ -20,6 +22,92 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
         )}
       />
     </button>
+  )
+}
+
+function UpdateSection() {
+  const currentVersion = useUpdateStore((s) => s.currentVersion)
+  const policy = useUpdateStore((s) => s.policy)
+  const checking = useUpdateStore((s) => s.checking)
+  const lastCheckedAt = useUpdateStore((s) => s.lastCheckedAt)
+  const remoteConfigError = useUpdateStore((s) => s.remoteConfigError)
+  const installState = useUpdateStore((s) => s.installState)
+  const installError = useUpdateStore((s) => s.installError)
+  const checkForUpdates = useUpdateStore((s) => s.checkForUpdates)
+  const startUpdate = useUpdateStore((s) => s.startUpdate)
+
+  const latestVersion = policy.kind === 'none' ? currentVersion : policy.latestVersion
+  const isBusy = installState === 'downloading' || installState === 'installing'
+
+  const status = (() => {
+    if (checking) return { label: 'Checking…', tone: 'muted' as const }
+    if (isBusy) return { label: installState === 'installing' ? 'Installing…' : 'Downloading…', tone: 'muted' as const }
+    if (installState === 'error') return { label: 'Update failed', tone: 'danger' as const }
+    if (policy.kind === 'mandatory') return { label: 'Update required', tone: 'danger' as const }
+    if (policy.kind === 'optional') return { label: 'Update available', tone: 'accent' as const }
+    return { label: "You're up to date.", tone: 'safe' as const }
+  })()
+
+  const statusClass = {
+    muted: 'text-text-muted',
+    danger: 'text-protected',
+    accent: 'text-accent',
+    safe: 'text-safe',
+  }[status.tone]
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Software Update</CardTitle>
+      </CardHeader>
+      <CardBody className="space-y-4">
+        <div className="space-y-2 text-[13px]">
+          <div className="flex items-center justify-between">
+            <span className="text-text-muted">Current Version</span>
+            <span className="font-medium text-text">{currentVersion}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-text-muted">Latest Version</span>
+            <span className="font-medium text-text">{latestVersion}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-text-muted">Status</span>
+            <span className={clsx('flex items-center gap-1.5 font-medium', statusClass)}>
+              {status.tone === 'safe' && <CheckCircle2 size={14} />}
+              {status.tone === 'danger' && <AlertTriangle size={14} />}
+              {status.label}
+            </span>
+          </div>
+          {lastCheckedAt && (
+            <div className="flex items-center justify-between">
+              <span className="text-text-muted">Last Checked</span>
+              <span className="text-text-faint">{formatDateTime(new Date(lastCheckedAt).toISOString())}</span>
+            </div>
+          )}
+        </div>
+
+        {installState === 'error' && installError && (
+          <p className="rounded-lg bg-protected-soft p-2.5 text-[12px] text-text">{installError}</p>
+        )}
+        {remoteConfigError && !checking && (
+          <p className="rounded-lg bg-surface-2 p-2.5 text-[12px] text-text-faint">
+            Couldn't reach the update server — showing the last known status.
+          </p>
+        )}
+
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={() => checkForUpdates({ force: true })} disabled={checking || isBusy}>
+            <RefreshCw size={14} className={checking ? 'animate-spin' : undefined} />
+            Check for Updates
+          </Button>
+          {(policy.kind === 'optional' || policy.kind === 'mandatory' || installState === 'error') && (
+            <Button variant="primary" onClick={startUpdate} disabled={isBusy}>
+              {installState === 'error' ? 'Retry Update' : 'Update Now'}
+            </Button>
+          )}
+        </div>
+      </CardBody>
+    </Card>
   )
 }
 
@@ -81,6 +169,8 @@ export function SettingsPage() {
           ))}
         </CardBody>
       </Card>
+
+      <UpdateSection />
 
       <Card>
         <CardHeader>

@@ -432,14 +432,31 @@ this one may or may not be available; confirm your real project ID first,
 then update `plugins.updater.endpoints` in `tauri.conf.json` to match before
 rebuilding.
 
-**Note on the sibling website repo**: `~/Documents/mac-storage-website`
-(the public marketing site) has no Firebase config yet either. If you want
-the update files and the marketing site on the same domain, that's a
-[multi-site Hosting](https://firebase.google.com/docs/hosting/multisites)
-or shared-rewrites setup spanning both repos — decide that before running
-`firebase init` so the two don't end up on conflicting configs. If they
-should be fully separate domains/sites, no coordination is needed and this
-repo's `firebase.json` is self-contained as-is.
+**⚠️ The sibling website repo is now the canonical Firebase Hosting
+deployment source for this site — do not deploy Hosting from here.**
+`~/Documents/mac-storage-website` serves the public marketing site on the
+*same* Hosting site (`mac-storage-manager`), and its build **includes this
+repo's updater files under `/updates/`**: its `public/updates/` folder is
+where this repo's `release/updates/` tree gets copied in before its `vite
+build` runs, and its `dist/` (website + `/updates/` together) is the thing
+that actually gets deployed.
+
+Firebase Hosting deployments **replace the entire hosted file set rather
+than merging it** — each deploy is a full snapshot, not an incremental
+patch. That means running `firebase deploy` from **this** repo's
+`firebase.json` (`public: "release"`, which only contains the updater
+tree, no website) would overwrite/remove the live public website's
+`index.html` and assets. This repo's `firebase.json` is kept only for local
+testing of the updater tree in isolation (`firebase emulators:start` /
+`firebase serve`) — it is not meant to be deployed for real.
+
+**Future Firebase Hosting deployments should therefore always be performed
+from the website repo, unless the hosting architecture is intentionally
+changed** (e.g. moving to Firebase's multi-site Hosting so the website and
+the updater tree deploy independently). The public `.dmg` installer is
+**not** part of this at all — it's hosted as a GitHub Release asset (see
+the website repo's `src/config/release.ts`),
+since Firebase Hosting's free Spark plan rejects raw `.dmg` uploads.
 
 **Any other static HTTPS host** (S3+CloudFront, GitHub Releases + a raw
 content proxy, Cloudflare Pages, your own server) works identically — the

@@ -12,6 +12,48 @@ dist
 dist-ssr
 *.local
 
+# Local environment overrides (Firebase config, update-check toggles) —
+# .env.example documents every key; never commit real .env files.
+.env
+.env.*
+!.env.example
+
+# Tauri updater signing keys must never be committed — the real keypair
+# lives outside the repo entirely (~/.tauri/), these rules are a defensive
+# backstop in case one is ever generated/copied in by mistake. See
+# docs/remote-updates-setup.md "Signing key setup" for where they belong.
+*.key
+*.key.pub
+*.pem
+*.p8
+*.p12
+*.mobileprovision
+*.cer
+*.keychain
+*.keychain-db
+signing.env
+*signing.env
+*.signing.env
+
+# Firebase service-account / admin credentials — this app only ever uses
+# the public client-side Web config (see .env.example); a service account
+# key must never land here even if a future feature (e.g. a Cloud Function)
+# adds one.
+serviceAccountKey*.json
+**/firebase-adminsdk-*.json
+.firebase/
+firebase-debug.log
+firestore-debug.log
+
+# Local release-hosting staging output (built updater artifacts + manifest
+# staged for upload) — build output, not source; never committed.
+/release/
+
+# Generic secrets catch-all — anything explicitly named as a secret should
+# never be committed regardless of where it lives.
+*.secret
+*secrets*.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

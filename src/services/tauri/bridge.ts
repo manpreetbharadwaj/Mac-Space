@@ -5,6 +5,8 @@ import type {
   RawPathAccess,
   RawScanProgressEvent,
   RawSystemOverview,
+  RawTrashOperationResult,
+  RawTrashRequestItem,
 } from './rawTypes'
 
 export function getSystemOverview(): Promise<RawSystemOverview> {
@@ -29,4 +31,12 @@ export function runFullScan(): Promise<RawFullScanResult> {
 
 export function onScanProgress(callback: (event: RawScanProgressEvent) => void): Promise<UnlistenFn> {
   return listen<RawScanProgressEvent>('scan-progress', (e) => callback(e.payload))
+}
+
+export function trashItems(items: RawTrashRequestItem[]): Promise<RawTrashOperationResult> {
+  return invoke('trash_items', { items })
+}
+
+export function onCleanupProgress(callback: (event: RawScanProgressEvent) => void): Promise<UnlistenFn> {
+  return listen<RawScanProgressEvent>('cleanup-progress', (e) => callback(e.payload))
 }

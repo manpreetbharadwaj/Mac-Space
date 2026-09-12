@@ -1,6 +1,7 @@
 import type {
   ApplicationItem,
   BrowserProfile,
+  CleanupFailure,
   CleanupItem,
   CleanupSession,
   DiskSummary,
@@ -13,11 +14,16 @@ import type {
 
 export type CleanMode = 'trash' | 'permanent'
 
-export interface ScanProgressUpdate {
-  /** Stable key, e.g. "developer" | "browsers" | "applications" | "files" — see PHASE_ORDER in Scan.tsx. */
+/** Shared shape for both the scan and cleanup progress event channels. */
+export interface ProgressUpdate {
   phase: string
   label: string
 }
+
+/** Stable key, e.g. "developer" | "browsers" | "applications" | "files" — see PHASE_ORDER in Scan.tsx. */
+export type ScanProgressUpdate = ProgressUpdate
+/** Stable key, e.g. "preparing" | "moving" | "verifying" | "done" — see CLEANUP_PHASE in CleanupActionBar.tsx. */
+export type CleanupProgressUpdate = ProgressUpdate
 
 export interface RunScanResult {
   scanSession: ScanSession
@@ -30,6 +36,14 @@ export interface CleanItemsResult {
   diskSummary: DiskSummary
   categories: StorageCategory[]
   remainingItems: CleanupItem[]
+  /**
+   * Real-cleanup-only (undefined in mock mode, where every item always
+   * succeeds). When present, the UI should only clear selection for/remove
+   * `successIds` — `failures` should stay selected/visible so the user can
+   * see and retry them.
+   */
+  successIds?: string[]
+  failures?: CleanupFailure[]
 }
 
 /**
@@ -54,7 +68,15 @@ export interface StorageService {
   ): Promise<RunScanResult>
   getApplications(): Promise<ApplicationItem[]>
   getBrowserProfiles(): Promise<BrowserProfile[]>
-  cleanItems(ids: string[], mode: CleanMode): Promise<CleanItemsResult>
+  /**
+   * `onProgress` is only meaningful for the real Tauri implementation (fed by
+   * actual native Trash progress); MockStorageService ignores it.
+   */
+  cleanItems(
+    ids: string[],
+    mode: CleanMode,
+    onProgress?: (update: CleanupProgressUpdate) => void,
+  ): Promise<CleanItemsResult>
   excludeItem(id: string): Promise<CleanupItem[]>
   revealInFinder(path: string): Promise<void>
   uninstallApp(id: string): Promise<ApplicationItem[]>

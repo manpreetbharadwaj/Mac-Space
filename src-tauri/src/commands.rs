@@ -1,16 +1,29 @@
 use crate::dto::{
     FullScanResultDto, PathAccessDto, ScanProgressEvent, ScanWarningDto, ScannedFileDto,
 };
+use crate::trash::{TrashOperationResult, TrashRequestItem};
 use crate::{applications, browsers, dedup, developer, disk, scanner};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 
 const PROGRESS_EVENT: &str = "scan-progress";
+const CLEANUP_PROGRESS_EVENT: &str = "cleanup-progress";
 
 fn emit_progress(app: &AppHandle, phase: &str, label: &str, done: bool) {
     let _ = app.emit(
         PROGRESS_EVENT,
+        ScanProgressEvent {
+            phase: phase.to_string(),
+            label: label.to_string(),
+            done,
+        },
+    );
+}
+
+fn emit_cleanup_progress(app: &AppHandle, phase: &str, label: &str, done: bool) {
+    let _ = app.emit(
+        CLEANUP_PROGRESS_EVENT,
         ScanProgressEvent {
             phase: phase.to_string(),
             label: label.to_string(),
@@ -166,5 +179,55 @@ pub async fn run_full_scan(app: AppHandle) -> Result<FullScanResultDto, String> 
         applications: application_items,
         warnings,
         scanned_at_ms: now_ms(),
+    })
+}
+
+/// Moves each requested item to the macOS Trash (never a permanent delete —
+/// see trash.rs). One item's failure never aborts the rest: every item gets
+/// its own validated attempt and its own result. Disk overview is captured
+/// tightly before/after so the frontend can report "moved to Trash" and
+/// "freed on disk" as the two distinct, honest numbers they are — moving a
+/// file to Trash on the same volume does not free space until Trash is
+/// emptied.
+#[tauri::command]
+pub async fn trash_items(app: AppHandle, items: Vec<TrashRequestItem>) -> Result<TrashOperationResult, String> {
+    let home = dirs::home_dir().ok_or_else(|| "Could not determine home directory".to_string())?;
+    let total = items.len();
+
+    emit_cleanup_progress(&app, "preparing", "Preparing cleanup…", false);
+    let overview_before = disk::get_system_overview();
+
+    let mut results = Vec::with_capacity(total);
+    for (index, item) in items.into_iter().enumerate() {
+        emit_cleanup_progress(
+            &app,
+            "moving",
+            &format!("Processing {} of {total}: {}", index + 1, item.name),
+            false,
+        );
+        let home_for_item = home.clone();
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            crate::trash::trash_single_item(&home_for_item, &item)
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+        results.push(result);
+    }
+
+    emit_cleanup_progress(&app, "verifying", "Verifying results…", false);
+    let overview_after = disk::get_system_overview();
+    emit_cleanup_progress(&app, "done", "Cleanup complete.", true);
+
+    let success_count = results.iter().filter(|r| r.success).count();
+    let failure_count = results.len() - success_count;
+    log::info!(
+        "trash_items complete: {} requested, {success_count} succeeded, {failure_count} failed",
+        results.len(),
+    );
+
+    Ok(TrashOperationResult {
+        results,
+        overview_before,
+        overview_after,
     })
 }

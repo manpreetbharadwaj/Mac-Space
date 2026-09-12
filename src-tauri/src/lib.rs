@@ -6,6 +6,7 @@ mod developer;
 mod disk;
 mod dto;
 mod scanner;
+mod trash;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -26,6 +27,7 @@ pub fn run() {
             commands::reveal_in_finder,
             commands::open_full_disk_access_settings,
             commands::run_full_scan,
+            commands::trash_items,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

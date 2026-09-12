@@ -52,8 +52,23 @@ export class MockStorageService implements StorageService {
     }
   }
 
+  /**
+   * `settings.exclusions` is the single source of truth for what's excluded
+   * — never a stale flag baked into the stored item. That means removing a
+   * path from Settings → Exclusions makes the item eligible again on the
+   * very next read, with no separate "un-exclude" bookkeeping required.
+   */
+  private itemsView(): CleanupItem[] {
+    const excludedPaths = new Set(this.state.settings.exclusions)
+    return this.state.cleanupItems.map((item) =>
+      excludedPaths.has(item.path)
+        ? { ...item, excluded: true, selected: false }
+        : { ...item, excluded: false },
+    )
+  }
+
   private categories(): StorageCategory[] {
-    return buildCategories(this.state.cleanupItems, this.state.applications)
+    return buildCategories(this.itemsView(), this.state.applications)
   }
 
   private diskSummary(): DiskSummary {
@@ -72,7 +87,7 @@ export class MockStorageService implements StorageService {
 
   async getCleanupItems(): Promise<CleanupItem[]> {
     await delay(150)
-    return this.state.cleanupItems
+    return this.itemsView()
   }
 
   async getScanSession(): Promise<ScanSession> {
@@ -82,7 +97,7 @@ export class MockStorageService implements StorageService {
 
   async runScan(): Promise<RunScanResult> {
     await delay(300)
-    const scanSession = buildInitialScanSession(this.state.cleanupItems)
+    const scanSession = buildInitialScanSession(this.itemsView())
     this.state.scanSession = scanSession
     this.persist()
     return { scanSession, categories: this.categories(), diskSummary: this.diskSummary() }
@@ -101,7 +116,7 @@ export class MockStorageService implements StorageService {
   async cleanItems(ids: string[], mode: CleanMode): Promise<CleanItemsResult> {
     await delay(600)
     const idSet = new Set(ids)
-    const cleaned = this.state.cleanupItems.filter((item) => idSet.has(item.id))
+    const cleaned = this.itemsView().filter((item) => idSet.has(item.id))
     const estimatedBytes = cleaned.reduce((sum, item) => sum + item.sizeBytes, 0)
 
     // Trash-based cleanup differs slightly from the estimate, like a real filesystem rescan would.
@@ -141,24 +156,21 @@ export class MockStorageService implements StorageService {
       session,
       diskSummary: this.diskSummary(),
       categories: this.categories(),
-      remainingItems: this.state.cleanupItems,
+      remainingItems: this.itemsView(),
     }
   }
 
   async excludeItem(id: string): Promise<CleanupItem[]> {
     await delay(150)
-    this.state.cleanupItems = this.state.cleanupItems.map((item) =>
-      item.id === id ? { ...item, excluded: true, selected: false } : item,
-    )
-    const excludedPath = this.state.cleanupItems.find((item) => item.id === id)?.path
-    if (excludedPath && !this.state.settings.exclusions.includes(excludedPath)) {
+    const target = this.state.cleanupItems.find((item) => item.id === id)
+    if (target && !this.state.settings.exclusions.includes(target.path)) {
       this.state.settings = {
         ...this.state.settings,
-        exclusions: [...this.state.settings.exclusions, excludedPath],
+        exclusions: [...this.state.settings.exclusions, target.path],
       }
     }
     this.persist()
-    return this.state.cleanupItems
+    return this.itemsView()
   }
 
   async revealInFinder(_path: string): Promise<void> {

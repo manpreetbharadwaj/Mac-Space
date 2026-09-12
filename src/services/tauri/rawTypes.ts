@@ -72,3 +72,29 @@ export interface RawFullScanResult {
   warnings: RawScanWarning[]
   scannedAtMs: number
 }
+
+/** Mirrors src-tauri/src/trash.rs::TrashRequestItem — sent to the native side. */
+export interface RawTrashRequestItem {
+  id: string
+  name: string
+  path: string
+  sizeBytes: number
+  safety: string
+}
+
+/** Mirrors src-tauri/src/trash.rs::TrashResultItem. */
+export interface RawTrashResultItem {
+  id: string
+  path: string
+  success: boolean
+  failureReason: string | null
+  bytesExpected: number
+  bytesProcessed: number
+}
+
+/** Mirrors src-tauri/src/trash.rs::TrashOperationResult. */
+export interface RawTrashOperationResult {
+  results: RawTrashResultItem[]
+  overviewBefore: RawSystemOverview
+  overviewAfter: RawSystemOverview
+}

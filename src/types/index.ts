@@ -90,16 +90,34 @@ export interface CategoryBreakdownEntry {
   bytes: number
 }
 
+export interface CleanupFailure {
+  path: string
+  name: string
+  reason: string
+}
+
 export interface CleanupSession {
   id: string
   completedAt: string
   estimatedBytes: number
+  /** For real (Tauri) cleanups: bytes successfully moved to Trash. For mock: the simulated reclaimed amount. */
   actualBytes: number
   itemIds: string[]
   categoryBreakdown: CategoryBreakdownEntry[]
   beforeUsedBytes: number
   afterUsedBytes: number
   itemCount: number
+  /**
+   * Real-cleanup-only fields (undefined in mock mode — never fabricated).
+   * `actualBytes` above is "moved to Trash"; `freedOnDiskBytes` is the
+   * separate, honest "immediately freed on disk" figure, which is usually
+   * ~0 right after a move-to-Trash (the files still occupy the same disk
+   * blocks until Trash is emptied).
+   */
+  successCount?: number
+  failureCount?: number
+  failures?: CleanupFailure[]
+  freedOnDiskBytes?: number
 }
 
 export type ScheduleFrequency = 'daily' | 'weekly' | 'biweekly' | 'monthly'

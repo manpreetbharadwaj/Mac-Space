@@ -1,15 +1,34 @@
 import type {
   ApplicationItem,
+  CleanupFailure,
   CleanupItem,
   CleanupSession,
+  DiskSummary,
   PermissionStatus,
   ScheduleRule,
   Settings,
+  StorageCategory,
 } from '@/types'
-import { checkPathAccess, onScanProgress, openFullDiskAccessSettings, revealInFinderNative, runFullScan } from './tauri/bridge'
-import { buildRealCategories, classifyFullScan, type ClassifiedScan } from './tauri/classify'
+import { buildInitialScanSession } from '@/mocks'
+import {
+  checkPathAccess,
+  onCleanupProgress,
+  onScanProgress,
+  openFullDiskAccessSettings,
+  revealInFinderNative,
+  runFullScan,
+  trashItems,
+} from './tauri/bridge'
+import { buildRealCategories, buildRealDiskSummary, classifyFullScan, type ClassifiedScan } from './tauri/classify'
 import { nextId } from '@/mocks/seed'
-import type { CleanItemsResult, CleanMode, RunScanResult, ScanProgressUpdate, StorageService } from './storageServiceTypes'
+import type {
+  CleanItemsResult,
+  CleanMode,
+  CleanupProgressUpdate,
+  RunScanResult,
+  ScanProgressUpdate,
+  StorageService,
+} from './storageServiceTypes'
 
 const STORAGE_KEY = 'mac-storage-manager:tauri:v1'
 
@@ -17,7 +36,6 @@ interface PersistedRealState {
   settings: Settings
   schedule: ScheduleRule
   history: CleanupSession[]
-  exclusions: string[]
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -43,17 +61,49 @@ const DEFAULT_SCHEDULE: ScheduleRule = {
 function loadPersisted(): PersistedRealState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw) as PersistedRealState
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<PersistedRealState> & { exclusions?: string[] }
+      // Migration: an earlier build stored a separate top-level `exclusions`
+      // array, disconnected from `settings.exclusions` (the Settings screen
+      // only ever showed/edited the latter). Fold any such leftover list in
+      // once, so paths excluded under the old scheme aren't silently lost.
+      const settings = parsed.settings ?? DEFAULT_SETTINGS
+      if (parsed.exclusions?.length) {
+        const merged = new Set([...settings.exclusions, ...parsed.exclusions])
+        return {
+          settings: { ...settings, exclusions: Array.from(merged) },
+          schedule: parsed.schedule ?? DEFAULT_SCHEDULE,
+          history: parsed.history ?? [],
+        }
+      }
+      return {
+        settings,
+        schedule: parsed.schedule ?? DEFAULT_SCHEDULE,
+        history: parsed.history ?? [],
+      }
+    }
   } catch {
     // fall through to defaults
   }
-  return { settings: DEFAULT_SETTINGS, schedule: DEFAULT_SCHEDULE, history: [], exclusions: [] }
+  return { settings: DEFAULT_SETTINGS, schedule: DEFAULT_SCHEDULE, history: [] }
 }
 
 /**
  * Real macOS implementation of StorageService, backed by Tauri commands.
- * Read-only for this phase: cleanItems/uninstallApp never touch real files —
- * see the comments on each for exactly what's simulated and why.
+ *
+ * `settings.exclusions` is the ONE source of truth for exclusions (matching
+ * MockStorageService) — there is no separate exclusions list. `this.scan`
+ * holds the raw, un-excluded scan result; every read derives `excluded` (and
+ * therefore categories/diskSummary/scanSession) fresh from the current
+ * exclusions list via currentItems()/currentCategories()/currentDiskSummary(),
+ * so removing a path from Settings → Exclusions makes it eligible again
+ * immediately, with no rescan required.
+ *
+ * cleanItems() performs a REAL move-to-Trash via the native `trash_items`
+ * command — see src-tauri/src/trash.rs. It never permanently deletes: even
+ * when `mode === 'permanent'` is requested, this phase only ever trashes
+ * (Settings' permanentDeleteEnabled is intentionally not wired to any
+ * irreversible native operation yet).
  */
 export class TauriStorageService implements StorageService {
   private local: PersistedRealState = loadPersisted()
@@ -68,9 +118,33 @@ export class TauriStorageService implements StorageService {
     }
   }
 
-  private applyExclusions(items: CleanupItem[]): CleanupItem[] {
-    const excludedPaths = new Set(this.local.exclusions)
-    return items.map((item) => (excludedPaths.has(item.path) ? { ...item, excluded: true } : item))
+  private currentItems(): CleanupItem[] {
+    if (!this.scan) return []
+    const excludedPaths = new Set(this.local.settings.exclusions)
+    return this.scan.items.map((item) =>
+      excludedPaths.has(item.path)
+        ? { ...item, excluded: true, selected: false }
+        : { ...item, excluded: false },
+    )
+  }
+
+  private currentCategories(): StorageCategory[] {
+    if (!this.scan) return []
+    return buildRealCategories(this.currentItems(), this.scan.applications, this.scan.overview.usedBytes)
+  }
+
+  private currentDiskSummary(): DiskSummary {
+    if (!this.scan) {
+      return { totalBytes: 0, usedBytes: 0, freeBytes: 0, purgeableBytes: null, reclaimableBytes: 0, lastScanAt: null }
+    }
+    return buildRealDiskSummary(
+      this.currentCategories(),
+      this.scan.overview.totalBytes,
+      this.scan.overview.usedBytes,
+      this.scan.overview.freeBytes,
+      this.scan.overview.purgeableBytes,
+      this.scan.diskSummary.lastScanAt,
+    )
   }
 
   private async ensureScanned(onProgress?: (update: ScanProgressUpdate) => void): Promise<ClassifiedScan> {
@@ -88,7 +162,6 @@ export class TauriStorageService implements StorageService {
       try {
         const raw = await runFullScan()
         const classified = classifyFullScan(raw)
-        classified.items = this.applyExclusions(classified.items)
         this.scan = classified
         return classified
       } finally {
@@ -101,28 +174,28 @@ export class TauriStorageService implements StorageService {
   }
 
   async getDiskSummary() {
-    const scan = await this.ensureScanned()
-    return scan.diskSummary
+    await this.ensureScanned()
+    return this.currentDiskSummary()
   }
 
   async getCategories() {
-    const scan = await this.ensureScanned()
-    return scan.categories
+    await this.ensureScanned()
+    return this.currentCategories()
   }
 
   async getCleanupItems() {
-    const scan = await this.ensureScanned()
-    return scan.items
+    await this.ensureScanned()
+    return this.currentItems()
   }
 
   async getScanSession() {
-    const scan = await this.ensureScanned()
-    return scan.scanSession
+    await this.ensureScanned()
+    return buildInitialScanSession(this.currentItems())
   }
 
   async runScan(_options?: { mode: 'quick' | 'deep' }, onProgress?: (update: ScanProgressUpdate) => void): Promise<RunScanResult> {
-    const scan = await this.performScan(onProgress)
-    return { scanSession: scan.scanSession, categories: scan.categories, diskSummary: scan.diskSummary }
+    await this.performScan(onProgress)
+    return { scanSession: buildInitialScanSession(this.currentItems()), categories: this.currentCategories(), diskSummary: this.currentDiskSummary() }
   }
 
   async getApplications(): Promise<ApplicationItem[]> {
@@ -136,40 +209,101 @@ export class TauriStorageService implements StorageService {
   }
 
   /**
-   * READ-ONLY PHASE: this never deletes, trashes, or moves any real file.
-   * It simulates the result (removes items from the current in-memory view
-   * and records a session) so the existing review/confirm/result UI keeps
-   * working end to end. Real cleanup arrives in the Safe Cleanup phase.
+   * Real cleanup: moves each selected item to the macOS Trash via the native
+   * `trash_items` command. Never permanently deletes — `mode` is accepted
+   * for interface compatibility but always results in a Trash move; this is
+   * intentional for this phase (see class doc comment). Partial success is
+   * expected and handled: failed items are reported back with a reason and
+   * are never removed from the cached scan, so they remain visible to retry.
    */
-  async cleanItems(ids: string[], _mode: CleanMode): Promise<CleanItemsResult> {
-    const scan = await this.ensureScanned()
+  async cleanItems(
+    ids: string[],
+    _mode: CleanMode,
+    onProgress?: (update: CleanupProgressUpdate) => void,
+  ): Promise<CleanItemsResult> {
+    await this.ensureScanned()
     const idSet = new Set(ids)
-    const cleaned = scan.items.filter((item) => idSet.has(item.id))
-    const estimatedBytes = cleaned.reduce((sum, item) => sum + item.sizeBytes, 0)
-    const beforeUsedBytes = scan.diskSummary.usedBytes
+    const targeted = this.currentItems().filter((item) => idSet.has(item.id))
 
-    const categoryTotals = new Map<string, number>()
-    for (const item of cleaned) {
-      categoryTotals.set(item.category, (categoryTotals.get(item.category) ?? 0) + item.sizeBytes)
+    const unlisten = onProgress
+      ? await onCleanupProgress((event) => onProgress({ phase: event.phase, label: event.label }))
+      : null
+
+    let raw
+    try {
+      raw = await trashItems(
+        targeted.map((item) => ({
+          id: item.id,
+          name: item.name,
+          path: item.path,
+          sizeBytes: item.sizeBytes,
+          safety: item.safety,
+        })),
+      )
+    } finally {
+      unlisten?.()
     }
 
-    scan.items = scan.items.filter((item) => !idSet.has(item.id))
-    scan.categories = recomputeCategoriesAfterRemoval(scan)
-    // No bytes were actually freed on disk — usedBytes/freeBytes stay real and unchanged.
+    const successIds: string[] = []
+    const failures: CleanupFailure[] = []
+    let movedToTrashBytes = 0
+    const categoryTotals = new Map<string, number>()
+
+    for (const result of raw.results) {
+      const item = targeted.find((i) => i.id === result.id)
+      if (result.success) {
+        successIds.push(result.id)
+        movedToTrashBytes += result.bytesProcessed
+        if (item) categoryTotals.set(item.category, (categoryTotals.get(item.category) ?? 0) + result.bytesProcessed)
+      } else {
+        failures.push({
+          path: result.path,
+          name: item?.name ?? result.path,
+          reason: result.failureReason ?? 'Unknown error',
+        })
+      }
+    }
+
+    // Remove only the successfully-trashed items from the raw cached scan —
+    // failed items stay exactly where they were, still selectable/visible.
+    if (this.scan) {
+      const successIdSet = new Set(successIds)
+      this.scan = {
+        ...this.scan,
+        items: this.scan.items.filter((item) => !successIdSet.has(item.id)),
+        overview: {
+          ...this.scan.overview,
+          totalBytes: raw.overviewAfter.totalBytes,
+          usedBytes: raw.overviewAfter.usedBytes,
+          freeBytes: raw.overviewAfter.freeBytes,
+          purgeableBytes: raw.overviewAfter.purgeableBytes,
+        },
+      }
+    }
+
+    const estimatedBytes = targeted.reduce((sum, item) => sum + item.sizeBytes, 0)
+    // Moving files to Trash on the same volume does not free disk space —
+    // this is the honest, separate "actually freed right now" figure, almost
+    // always ~0 immediately after a move-to-Trash.
+    const freedOnDiskBytes = Math.max(0, raw.overviewBefore.usedBytes - raw.overviewAfter.usedBytes)
 
     const session: CleanupSession = {
       id: nextId('cleanup'),
       completedAt: new Date().toISOString(),
       estimatedBytes,
-      actualBytes: 0,
-      itemIds: ids,
+      actualBytes: movedToTrashBytes,
+      itemIds: successIds,
       categoryBreakdown: Array.from(categoryTotals.entries()).map(([category, bytes]) => ({
         category: category as CleanupItem['category'],
         bytes,
       })),
-      beforeUsedBytes,
-      afterUsedBytes: beforeUsedBytes,
-      itemCount: cleaned.length,
+      beforeUsedBytes: raw.overviewBefore.usedBytes,
+      afterUsedBytes: raw.overviewAfter.usedBytes,
+      itemCount: successIds.length,
+      successCount: successIds.length,
+      failureCount: failures.length,
+      failures,
+      freedOnDiskBytes,
     }
 
     this.local.history = [session, ...this.local.history]
@@ -178,21 +312,22 @@ export class TauriStorageService implements StorageService {
 
     return {
       session,
-      diskSummary: scan.diskSummary,
-      categories: scan.categories,
-      remainingItems: scan.items,
+      diskSummary: this.currentDiskSummary(),
+      categories: this.currentCategories(),
+      remainingItems: this.currentItems(),
+      successIds,
+      failures,
     }
   }
 
   async excludeItem(id: string): Promise<CleanupItem[]> {
-    const scan = await this.ensureScanned()
-    const target = scan.items.find((item) => item.id === id)
-    if (target && !this.local.exclusions.includes(target.path)) {
-      this.local.exclusions = [...this.local.exclusions, target.path]
+    const items = this.currentItems()
+    const target = items.find((item) => item.id === id)
+    if (target && !this.local.settings.exclusions.includes(target.path)) {
+      this.local.settings = { ...this.local.settings, exclusions: [...this.local.settings.exclusions, target.path] }
       this.persistLocal()
     }
-    scan.items = scan.items.map((item) => (item.id === id ? { ...item, excluded: true, selected: false } : item))
-    return scan.items
+    return this.currentItems()
   }
 
   async revealInFinder(path: string): Promise<void> {
@@ -200,9 +335,10 @@ export class TauriStorageService implements StorageService {
   }
 
   /**
-   * Real application uninstall is deferred to the Safe Cleanup phase. The
-   * Applications screen disables this control entirely in real-data mode, so
-   * this is only a defensive no-op fallback (never actually removes an app).
+   * Real application uninstall is deferred to a later phase (associated
+   * Application Support/preferences/cache data needs separate safety
+   * handling). The Applications screen disables this control entirely in
+   * real-data mode, so this is only a defensive no-op fallback.
    */
   async uninstallApp(_id: string): Promise<ApplicationItem[]> {
     const scan = await this.ensureScanned()
@@ -281,7 +417,7 @@ export class TauriStorageService implements StorageService {
 
   async resetDemoData(): Promise<void> {
     localStorage.removeItem(STORAGE_KEY)
-    this.local = { settings: DEFAULT_SETTINGS, schedule: DEFAULT_SCHEDULE, history: [], exclusions: [] }
+    this.local = { settings: DEFAULT_SETTINGS, schedule: DEFAULT_SCHEDULE, history: [] }
     this.scan = null
     this.persistLocal()
   }
@@ -291,10 +427,6 @@ function mapAccessState(state: 'accessible' | 'denied' | 'not-found'): Permissio
   if (state === 'accessible') return 'granted'
   if (state === 'not-found') return 'not-requested'
   return 'denied'
-}
-
-function recomputeCategoriesAfterRemoval(scan: ClassifiedScan) {
-  return buildRealCategories(scan.items, scan.applications, scan.diskSummary.usedBytes)
 }
 
 export const tauriStorageService = new TauriStorageService()

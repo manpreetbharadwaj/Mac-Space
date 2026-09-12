@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type {
   ApplicationItem,
   BrowserProfile,
+  CleanupFailure,
   CleanupItem,
   CleanupSession,
   DiskSummary,
@@ -13,13 +14,22 @@ import type {
   StorageCategoryId,
 } from '@/types'
 import { storageService, type CleanMode } from '@/services/storageService'
-import type { ScanProgressUpdate } from '@/services/storageServiceTypes'
+import type { CleanupProgressUpdate, ScanProgressUpdate } from '@/services/storageServiceTypes'
 import { dataSource, type DataSource } from '@/services/environment'
 
 export interface Toast {
   id: string
   message: string
   tone: 'default' | 'success' | 'warning'
+}
+
+export interface LastCleanupResult {
+  actualBytes: number
+  itemCount: number
+  successCount: number
+  failureCount: number
+  failures: CleanupFailure[]
+  freedOnDiskBytes?: number
 }
 
 interface AppState {
@@ -39,7 +49,7 @@ interface AppState {
   cleaning: boolean
   selectedIds: Set<string>
   toasts: Toast[]
-  lastCleanupResult: { actualBytes: number; itemCount: number } | null
+  lastCleanupResult: LastCleanupResult | null
 
   init: () => Promise<void>
   runScan: (onProgress?: (update: ScanProgressUpdate) => void) => Promise<void>
@@ -48,7 +58,7 @@ interface AppState {
   deselectIds: (ids: string[]) => void
   clearSelection: () => void
   smartSelect: () => void
-  cleanSelected: (mode: CleanMode) => Promise<void>
+  cleanSelected: (mode: CleanMode, onProgress?: (update: CleanupProgressUpdate) => void) => Promise<void>
   excludeItem: (id: string) => Promise<void>
   revealInFinder: (path: string) => Promise<void>
   uninstallApp: (id: string) => Promise<void>
@@ -159,24 +169,51 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ selectedIds: new Set(greenIds) })
   },
 
-  cleanSelected: async (mode) => {
+  cleanSelected: async (mode, onProgress) => {
     const ids = Array.from(get().selectedIds)
     if (ids.length === 0) return
     set({ cleaning: true })
-    const result = await storageService.cleanItems(ids, mode)
+    const result = await storageService.cleanItems(ids, mode, onProgress)
+
+    // Mock mode never reports successIds/failures (everything always
+    // succeeds there) — default to "all requested ids succeeded" so the
+    // selection-clearing logic below behaves identically to before.
+    const successIds = result.successIds ?? ids
+    const failures = result.failures ?? []
+
+    const remainingSelection = new Set(get().selectedIds)
+    for (const id of successIds) remainingSelection.delete(id)
+    // Failed ids are deliberately left in the selection — they stay visible
+    // and selected so the user can see and retry them.
+
     set({
       cleaning: false,
       cleanupItems: result.remainingItems,
       diskSummary: result.diskSummary,
       categories: result.categories,
       history: [result.session, ...get().history],
-      selectedIds: new Set(),
-      lastCleanupResult: { actualBytes: result.session.actualBytes, itemCount: result.session.itemCount },
+      selectedIds: remainingSelection,
+      lastCleanupResult: {
+        actualBytes: result.session.actualBytes,
+        itemCount: result.session.itemCount,
+        successCount: result.session.successCount ?? result.session.itemCount,
+        failureCount: result.session.failureCount ?? 0,
+        failures,
+        freedOnDiskBytes: result.session.freedOnDiskBytes,
+      },
     })
-    get().pushToast(
-      `Cleaned ${result.session.itemCount} item${result.session.itemCount === 1 ? '' : 's'} — space reclaimed.`,
-      'success',
-    )
+
+    if (failures.length > 0) {
+      get().pushToast(
+        `Moved ${successIds.length} item${successIds.length === 1 ? '' : 's'} to Trash — ${failures.length} failed.`,
+        'warning',
+      )
+    } else {
+      get().pushToast(
+        `Cleaned ${result.session.itemCount} item${result.session.itemCount === 1 ? '' : 's'} — space reclaimed.`,
+        'success',
+      )
+    }
   },
 
   excludeItem: async (id) => {
@@ -184,6 +221,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     const next = new Set(get().selectedIds)
     next.delete(id)
     set({ cleanupItems, selectedIds: next })
+    // Excluding an item persists into settings.exclusions (the single source
+    // of truth — see MockStorageService/TauriStorageService) — refetch
+    // settings too, not just categories/items, so the Settings screen shows
+    // the new exclusion immediately instead of only after a reload.
+    const settings = await storageService.getSettings()
+    set({ settings })
     await refreshCore(set)
     get().pushToast('Item excluded — it will no longer appear in recommendations.', 'default')
   },
@@ -209,6 +252,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   saveSettings: async (settings) => {
     const saved = await storageService.saveSettings(settings)
     set({ settings: saved })
+    // Exclusions live inside `settings` — re-fetch items/categories/disk
+    // summary so adding or removing one is reflected immediately, without
+    // requiring a rescan.
+    await refreshCore(set)
   },
 
   requestPermission: async (category) => {

@@ -5,6 +5,7 @@ import type {
   CleanupSession,
   DiskSummary,
   PermissionStatus,
+  ScanEvent,
   ScanSession,
   ScheduleRule,
   Settings,
@@ -135,6 +136,7 @@ export interface SeedData {
   schedule: ScheduleRule
   settings: Settings
   scanSession: ScanSession
+  scanEvents: ScanEvent[]
 }
 
 export function createSeedData(): SeedData {
@@ -150,6 +152,7 @@ export function createSeedData(): SeedData {
     schedule: mockScheduleRule,
     settings: defaultSettings,
     scanSession,
+    scanEvents: [],
   }
 }
 

@@ -99,6 +99,12 @@ export interface CleanupFailure {
 export interface CleanupSession {
   id: string
   completedAt: string
+  /**
+   * Missing on old persisted sessions from before this field existed —
+   * never assume a value; a `manual` fallback is safe since scheduled
+   * auto-clean sessions are new starting now and always set it.
+   */
+  source?: 'manual' | 'scheduled-auto-clean'
   estimatedBytes: number
   /** For real (Tauri) cleanups: bytes successfully moved to Trash. For mock: the simulated reclaimed amount. */
   actualBytes: number
@@ -127,12 +133,39 @@ export interface ScheduleRule {
   enabled: boolean
   frequency: ScheduleFrequency
   mode: ScheduleMode
+  /** 24-hour "HH:MM", local time — e.g. "09:00". */
+  timeOfDay: string
   safeCategories: StorageCategoryId[]
   thresholdFreeGb: number
   thresholdReclaimableGb: number
   emailSummaryEnabled: boolean
   lastRunAt: string | null
   nextRunAt: string | null
+  /**
+   * The native auto-clean policy version (src-tauri/src/auto_clean.rs's
+   * `POLICY_VERSION`) the user last explicitly confirmed via the Schedule
+   * page's consent modal. The background job independently refuses to
+   * auto-clean unless this is >= its own compiled-in policy version —
+   * `mode: 'auto-clean'` alone is never sufficient. 0 means "never
+   * consented."
+   */
+  autoCleanConsentVersion: number
+}
+
+/**
+ * A scan-only event (manual or scheduled) — deliberately separate from
+ * CleanupSession, which represents an actual cleanup. A scheduled run never
+ * cleans anything, so it must never be recorded as one (see History page —
+ * scan events are shown separately on the Schedule page instead).
+ */
+export interface ScanEvent {
+  id: string
+  occurredAt: string
+  source: 'manual' | 'scheduled'
+  foundBytes: number
+  reclaimableBytes: number
+  freeBytes: number
+  notificationSent: boolean
 }
 
 export type ThemePreference = 'light' | 'dark' | 'system'

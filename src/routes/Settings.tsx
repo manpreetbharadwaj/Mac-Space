@@ -4,26 +4,12 @@ import { clsx } from 'clsx'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
+import { PremiumSwitch } from '@/components/ui/PremiumSwitch'
+import { SystemSettingsAction } from '@/components/ui/SystemSettingsAction'
 import { useAppStore } from '@/store/useAppStore'
 import { useUpdateStore } from '@/store/useUpdateStore'
 import { formatDateTime } from '@/lib/format'
 import type { ThemePreference } from '@/types'
-
-function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      onClick={() => onChange(!checked)}
-      className={clsx('relative h-6 w-11 shrink-0 rounded-full transition-colors', checked ? 'bg-accent' : 'bg-surface-2')}
-    >
-      <span
-        className={clsx(
-          'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform',
-          checked ? 'translate-x-5' : 'translate-x-0.5',
-        )}
-      />
-    </button>
-  )
-}
 
 function UpdateSection() {
   const currentVersion = useUpdateStore((s) => s.currentVersion)
@@ -123,6 +109,8 @@ export function SettingsPage() {
   const saveSettings = useAppStore((s) => s.saveSettings)
   const permissions = useAppStore((s) => s.permissions)
   const requestPermission = useAppStore((s) => s.requestPermission)
+  const notificationPermission = useAppStore((s) => s.notificationPermission)
+  const openNotificationSettings = useAppStore((s) => s.openNotificationSettings)
   const resetDemoData = useAppStore((s) => s.resetDemoData)
   const [newExclusion, setNewExclusion] = useState('')
 
@@ -184,9 +172,11 @@ export function SettingsPage() {
                 Adds an advanced "delete permanently" option to the cleanup review — off by default.
               </p>
             </div>
-            <Toggle
+            <PremiumSwitch
               checked={settings.permanentDeleteEnabled}
               onChange={(v) => saveSettings({ ...current, permanentDeleteEnabled: v })}
+              label="Allow permanent deletion"
+              tone="danger"
             />
           </div>
           {settings.permanentDeleteEnabled && (
@@ -200,10 +190,26 @@ export function SettingsPage() {
               <p className="text-[13px] font-medium text-text">Notifications</p>
               <p className="text-[12px] text-text-muted">Threshold alerts and scheduled scan results.</p>
             </div>
-            <Toggle
+            <PremiumSwitch
               checked={settings.notificationsEnabled}
               onChange={(v) => saveSettings({ ...current, notificationsEnabled: v })}
+              label="Notifications"
             />
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-lg bg-surface-2 p-2.5">
+            <p className="text-[12px] text-text-muted">
+              macOS permission:{' '}
+              <span className="font-medium text-text">
+                {notificationPermission === 'granted'
+                  ? 'Granted'
+                  : notificationPermission === 'denied'
+                    ? 'Denied'
+                    : 'Not yet requested'}
+              </span>
+              {notificationPermission === 'granted' &&
+                ' — this reflects the app-level check only; verify in System Settings if a notification never appears.'}
+            </p>
+            <SystemSettingsAction label="Open Notification Settings" onClick={openNotificationSettings} />
           </div>
         </CardBody>
       </Card>
@@ -220,7 +226,11 @@ export function SettingsPage() {
                 Scan duration, feature usage, and error codes only — never file names, paths, or contents.
               </p>
             </div>
-            <Toggle checked={settings.analyticsOptIn} onChange={(v) => saveSettings({ ...current, analyticsOptIn: v })} />
+            <PremiumSwitch
+              checked={settings.analyticsOptIn}
+              onChange={(v) => saveSettings({ ...current, analyticsOptIn: v })}
+              label="Share anonymous product analytics"
+            />
           </div>
           <p className="rounded-lg bg-surface-2 p-3 text-[12px] text-text-muted">
             Scanning and classification happen entirely on this Mac. Nothing about your files is uploaded — this

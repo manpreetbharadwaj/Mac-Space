@@ -5,7 +5,9 @@ import type {
   CleanupItem,
   CleanupSession,
   DiskSummary,
+  PermissionState,
   PermissionStatus,
+  ScanEvent,
   ScanSession,
   ScheduleRule,
   Settings,
@@ -83,9 +85,28 @@ export interface StorageService {
   getPermissions(): Promise<PermissionStatus[]>
   requestPermission(category: PermissionStatus['category']): Promise<PermissionStatus[]>
   getSchedule(): Promise<ScheduleRule>
+  /**
+   * Saving an enabled schedule installs/updates the native background
+   * scheduler (a launchd LaunchAgent — see src-tauri/src/schedule.rs);
+   * saving a disabled one removes it. No-op in mock mode. `nextRunAt` on
+   * the returned rule reflects whatever the native side actually computed.
+   */
   saveSchedule(rule: ScheduleRule): Promise<ScheduleRule>
+  /** Whether the native scheduler is currently installed — diagnostic only, for the Schedule screen. Mock mode mirrors `schedule.enabled`. */
+  getScheduleStatus(): Promise<boolean>
+  /** Scan-only events (manual or scheduled) — never cleanup. See ScanEvent. */
+  getScanEvents(): Promise<ScanEvent[]>
   getHistory(): Promise<CleanupSession[]>
   getSettings(): Promise<Settings>
   saveSettings(settings: Settings): Promise<Settings>
+  /**
+   * Best-effort — see the caveat on TauriStorageService.getNotificationPermissionState:
+   * the underlying Tauri plugin cannot currently distinguish real OS denial
+   * from "granted" on desktop, so this should never be presented as a
+   * certain OS-level fact in the UI.
+   */
+  getNotificationPermissionState(): Promise<PermissionState>
+  requestNotificationPermission(): Promise<PermissionState>
+  openNotificationSettings(): Promise<void>
   resetDemoData(): Promise<void>
 }

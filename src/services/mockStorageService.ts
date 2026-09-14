@@ -4,7 +4,9 @@ import type {
   CleanupItem,
   CleanupSession,
   DiskSummary,
+  PermissionState,
   PermissionStatus,
+  ScanEvent,
   ScanSession,
   ScheduleRule,
   Settings,
@@ -25,6 +27,7 @@ interface PersistedState {
   schedule: ScheduleRule
   settings: Settings
   scanSession: ScanSession
+  scanEvents: ScanEvent[]
 }
 
 function delay(ms: number): Promise<void> {
@@ -99,8 +102,19 @@ export class MockStorageService implements StorageService {
     await delay(300)
     const scanSession = buildInitialScanSession(this.itemsView())
     this.state.scanSession = scanSession
+    const diskSummary = this.diskSummary()
+    const scanEvent: ScanEvent = {
+      id: nextId('scan'),
+      occurredAt: new Date().toISOString(),
+      source: 'manual',
+      foundBytes: diskSummary.usedBytes,
+      reclaimableBytes: diskSummary.reclaimableBytes,
+      freeBytes: diskSummary.freeBytes,
+      notificationSent: false,
+    }
+    this.state.scanEvents = [scanEvent, ...(this.state.scanEvents ?? [])].slice(0, 50)
     this.persist()
-    return { scanSession, categories: this.categories(), diskSummary: this.diskSummary() }
+    return { scanSession, categories: this.categories(), diskSummary }
   }
 
   async getApplications(): Promise<ApplicationItem[]> {
@@ -136,6 +150,7 @@ export class MockStorageService implements StorageService {
     const session: CleanupSession = {
       id: nextId('cleanup'),
       completedAt: new Date().toISOString(),
+      source: 'manual',
       estimatedBytes,
       actualBytes,
       itemIds: ids,
@@ -148,8 +163,10 @@ export class MockStorageService implements StorageService {
       itemCount: cleaned.length,
     }
 
+    // Does not touch schedule.lastRunAt — see the same note on
+    // TauriStorageService.cleanItems(): that field means "last time the
+    // scheduled background job ran," not "last time anything happened."
     this.state.history = [session, ...this.state.history]
-    this.state.schedule = { ...this.state.schedule, lastRunAt: session.completedAt }
     this.persist()
 
     return {
@@ -205,9 +222,24 @@ export class MockStorageService implements StorageService {
 
   async saveSchedule(rule: ScheduleRule): Promise<ScheduleRule> {
     await delay(250)
-    this.state.schedule = rule
+    // No real launchd job to install in the browser prototype — simulate a
+    // sensible nextRunAt so the UI still shows something believable.
+    const next = new Date()
+    const days = rule.frequency === 'daily' ? 1 : rule.frequency === 'weekly' ? 7 : rule.frequency === 'biweekly' ? 14 : 30
+    next.setDate(next.getDate() + days)
+    this.state.schedule = rule.enabled ? { ...rule, nextRunAt: next.toISOString() } : { ...rule, nextRunAt: null }
     this.persist()
     return this.state.schedule
+  }
+
+  async getScheduleStatus(): Promise<boolean> {
+    await delay(80)
+    return this.state.schedule.enabled
+  }
+
+  async getScanEvents(): Promise<ScanEvent[]> {
+    await delay(100)
+    return this.state.scanEvents ?? []
   }
 
   async getHistory(): Promise<CleanupSession[]> {
@@ -225,6 +257,21 @@ export class MockStorageService implements StorageService {
     this.state.settings = settings
     this.persist()
     return this.state.settings
+  }
+
+  /** No real OS permission to check in the browser prototype — mirrors the in-app toggle instead. */
+  async getNotificationPermissionState(): Promise<PermissionState> {
+    await delay(80)
+    return this.state.settings.notificationsEnabled ? 'granted' : 'not-requested'
+  }
+
+  async requestNotificationPermission(): Promise<PermissionState> {
+    await delay(150)
+    return this.getNotificationPermissionState()
+  }
+
+  async openNotificationSettings(): Promise<void> {
+    await delay(80)
   }
 
   async resetDemoData(): Promise<void> {

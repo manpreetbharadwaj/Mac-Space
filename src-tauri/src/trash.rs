@@ -32,7 +32,10 @@ const SENSITIVE_KEYWORDS: &[&str] = &[
     "backup", "keychain", "1password", "wallet", ".key", "private key", "passwords",
 ];
 
-fn looks_sensitive(path: &Path) -> bool {
+/// `pub(crate)` (not private) so auto_clean.rs's independent unattended-policy
+/// checks can reuse this exact primitive — that's a same-trust-boundary reuse
+/// (both are native Rust), unlike the frontend duplication above.
+pub(crate) fn looks_sensitive(path: &Path) -> bool {
     let haystack = path.to_string_lossy().to_lowercase();
     SENSITIVE_KEYWORDS.iter().any(|kw| haystack.contains(kw))
 }

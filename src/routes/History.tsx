@@ -158,8 +158,20 @@ export function HistoryPage() {
             <Card key={session.id}>
               <CardBody className="flex flex-wrap items-center justify-between gap-4">
                 <div>
-                  <p className="text-[13px] font-medium text-text">{formatDate(session.completedAt)}</p>
-                  <p className="text-[12px] text-text-faint">{session.itemCount} items cleaned</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-[13px] font-medium text-text">{formatDate(session.completedAt)}</p>
+                    {session.source === 'scheduled-auto-clean' && (
+                      <span className="rounded-full bg-safe-soft px-2 py-0.5 text-[10px] font-medium text-safe">
+                        Auto-clean
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[12px] text-text-faint">
+                    {session.itemCount} item{session.itemCount === 1 ? '' : 's'} cleaned
+                    {!!session.failureCount && session.failureCount > 0 && (
+                      <span className="text-review"> · {session.failureCount} failed</span>
+                    )}
+                  </p>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {session.categoryBreakdown.map((c) => (

@@ -4,7 +4,9 @@ import type {
   CleanupItem,
   CleanupSession,
   DiskSummary,
+  PermissionState,
   PermissionStatus,
+  ScanEvent,
   ScheduleRule,
   Settings,
   StorageCategory,
@@ -12,12 +14,22 @@ import type {
 import { buildInitialScanSession } from '@/mocks'
 import {
   checkPathAccess,
+  getAppState,
+  getNotificationPermissionState as bridgeGetNotificationPermissionState,
+  getScheduleStatus as bridgeGetScheduleStatus,
+  healSchedulePath,
+  installSchedule,
   onCleanupProgress,
   onScanProgress,
   openFullDiskAccessSettings,
+  openNotificationSettings as bridgeOpenNotificationSettings,
+  removeSchedule,
+  requestNotificationPermission as bridgeRequestNotificationPermission,
   revealInFinderNative,
   runFullScan,
+  saveAppState,
   trashItems,
+  type RawNotificationPermission,
 } from './tauri/bridge'
 import { buildRealCategories, buildRealDiskSummary, classifyFullScan, type ClassifiedScan } from './tauri/classify'
 import { nextId } from '@/mocks/seed'
@@ -30,12 +42,14 @@ import type {
   StorageService,
 } from './storageServiceTypes'
 
-const STORAGE_KEY = 'mac-storage-manager:tauri:v1'
+/** Old browser-localStorage key, from before settings/schedule/history moved to a Rust-backed file (see state.rs) — read once, for migration only. */
+const LEGACY_STORAGE_KEY = 'mac-storage-manager:tauri:v1'
 
 interface PersistedRealState {
   settings: Settings
   schedule: ScheduleRule
   history: CleanupSession[]
+  scanEvents: ScanEvent[]
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -50,42 +64,73 @@ const DEFAULT_SCHEDULE: ScheduleRule = {
   enabled: false,
   frequency: 'weekly',
   mode: 'reminder',
+  timeOfDay: '09:00',
   safeCategories: ['developer', 'system', 'browser'],
   thresholdFreeGb: 40,
   thresholdReclaimableGb: 15,
   emailSummaryEnabled: false,
   lastRunAt: null,
   nextRunAt: null,
+  autoCleanConsentVersion: 0,
 }
 
-function loadPersisted(): PersistedRealState {
+function readLegacyLocalStorage(): Partial<PersistedRealState> | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<PersistedRealState> & { exclusions?: string[] }
-      // Migration: an earlier build stored a separate top-level `exclusions`
-      // array, disconnected from `settings.exclusions` (the Settings screen
-      // only ever showed/edited the latter). Fold any such leftover list in
-      // once, so paths excluded under the old scheme aren't silently lost.
-      const settings = parsed.settings ?? DEFAULT_SETTINGS
-      if (parsed.exclusions?.length) {
-        const merged = new Set([...settings.exclusions, ...parsed.exclusions])
-        return {
-          settings: { ...settings, exclusions: Array.from(merged) },
-          schedule: parsed.schedule ?? DEFAULT_SCHEDULE,
-          history: parsed.history ?? [],
-        }
-      }
-      return {
-        settings,
-        schedule: parsed.schedule ?? DEFAULT_SCHEDULE,
-        history: parsed.history ?? [],
-      }
-    }
+    const raw = localStorage.getItem(LEGACY_STORAGE_KEY)
+    if (!raw) return null
+    return JSON.parse(raw) as Partial<PersistedRealState> & { exclusions?: string[] }
   } catch {
-    // fall through to defaults
+    return null
   }
-  return { settings: DEFAULT_SETTINGS, schedule: DEFAULT_SCHEDULE, history: [] }
+}
+
+/**
+ * Loads settings/schedule/history/scanEvents from the Rust-backed state
+ * file (see src-tauri/src/state.rs) — a plain JSON blob on disk, readable
+ * by both this running app AND the headless `--background-scan` process,
+ * which has no WebView and therefore no access to localStorage at all.
+ *
+ * One-time migration: if the Rust file has never been written (brand new,
+ * or upgrading from a build that only used localStorage), fold in whatever
+ * was in the old localStorage key so existing settings/exclusions/history
+ * aren't silently lost. The old key is left in place afterwards (harmless,
+ * unused) rather than cleared, to minimize risk.
+ */
+async function loadPersisted(): Promise<PersistedRealState> {
+  const raw = (await getAppState()) as Partial<PersistedRealState> | null
+
+  if (raw && (raw.settings || raw.schedule || raw.history)) {
+    return {
+      settings: { ...DEFAULT_SETTINGS, ...raw.settings },
+      schedule: { ...DEFAULT_SCHEDULE, ...raw.schedule },
+      history: raw.history ?? [],
+      scanEvents: raw.scanEvents ?? [],
+    }
+  }
+
+  // Nothing in the new store yet — check the legacy localStorage key.
+  const legacy = readLegacyLocalStorage()
+  if (legacy) {
+    const settings = legacy.settings ?? DEFAULT_SETTINGS
+    // Even-older migration this file already handled: a top-level
+    // `exclusions` array disconnected from `settings.exclusions`.
+    const legacyExclusions = (legacy as { exclusions?: string[] }).exclusions
+    const exclusions = legacyExclusions?.length
+      ? Array.from(new Set([...settings.exclusions, ...legacyExclusions]))
+      : settings.exclusions
+    return {
+      settings: { ...settings, exclusions },
+      schedule: { ...DEFAULT_SCHEDULE, ...legacy.schedule },
+      history: legacy.history ?? [],
+      scanEvents: [],
+    }
+  }
+
+  return { settings: DEFAULT_SETTINGS, schedule: DEFAULT_SCHEDULE, history: [], scanEvents: [] }
+}
+
+function mapNotificationPermission(raw: RawNotificationPermission): PermissionState {
+  return raw === 'prompt' ? 'not-requested' : raw
 }
 
 /**
@@ -106,20 +151,39 @@ function loadPersisted(): PersistedRealState {
  * irreversible native operation yet).
  */
 export class TauriStorageService implements StorageService {
-  private local: PersistedRealState = loadPersisted()
+  private local: PersistedRealState | null = null
+  private localPromise: Promise<PersistedRealState> | null = null
   private scan: ClassifiedScan | null = null
   private scanPromise: Promise<ClassifiedScan> | null = null
 
-  private persistLocal() {
+  private async ensureLocal(): Promise<PersistedRealState> {
+    if (this.local) return this.local
+    if (!this.localPromise) {
+      this.localPromise = loadPersisted().then((loaded) => {
+        this.local = loaded
+        // Fire-and-forget: if a schedule is enabled, make sure the
+        // installed LaunchAgent (if any) still points at this app's
+        // current path — a no-op unless the app has moved since install.
+        if (loaded.schedule.enabled) {
+          void healSchedulePath(loaded.schedule.frequency, loaded.schedule.timeOfDay)
+        }
+        return loaded
+      })
+    }
+    return this.localPromise
+  }
+
+  private async persistLocal() {
+    if (!this.local) return
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.local))
-    } catch {
-      // localStorage unavailable — session continues without persistence
+      await saveAppState(this.local)
+    } catch (err) {
+      console.error('Failed to persist app state:', err)
     }
   }
 
   private currentItems(): CleanupItem[] {
-    if (!this.scan) return []
+    if (!this.scan || !this.local) return []
     const excludedPaths = new Set(this.local.settings.exclusions)
     return this.scan.items.map((item) =>
       excludedPaths.has(item.path)
@@ -148,6 +212,7 @@ export class TauriStorageService implements StorageService {
   }
 
   private async ensureScanned(onProgress?: (update: ScanProgressUpdate) => void): Promise<ClassifiedScan> {
+    await this.ensureLocal()
     if (this.scan) return this.scan
     return this.performScan(onProgress)
   }
@@ -194,8 +259,26 @@ export class TauriStorageService implements StorageService {
   }
 
   async runScan(_options?: { mode: 'quick' | 'deep' }, onProgress?: (update: ScanProgressUpdate) => void): Promise<RunScanResult> {
+    const local = await this.ensureLocal()
     await this.performScan(onProgress)
-    return { scanSession: buildInitialScanSession(this.currentItems()), categories: this.currentCategories(), diskSummary: this.currentDiskSummary() }
+    const diskSummary = this.currentDiskSummary()
+
+    // Recorded as a "manual" ScanEvent — same shape as a scheduled run's
+    // record (see background.rs), but never touches schedule.lastRunAt or
+    // history (this is a scan, not a cleanup — no space was freed).
+    const scanEvent: ScanEvent = {
+      id: nextId('scan'),
+      occurredAt: new Date().toISOString(),
+      source: 'manual',
+      foundBytes: diskSummary.usedBytes,
+      reclaimableBytes: diskSummary.reclaimableBytes,
+      freeBytes: diskSummary.freeBytes,
+      notificationSent: false,
+    }
+    local.scanEvents = [scanEvent, ...local.scanEvents].slice(0, 50)
+    await this.persistLocal()
+
+    return { scanSession: buildInitialScanSession(this.currentItems()), categories: this.currentCategories(), diskSummary }
   }
 
   async getApplications(): Promise<ApplicationItem[]> {
@@ -221,6 +304,7 @@ export class TauriStorageService implements StorageService {
     _mode: CleanMode,
     onProgress?: (update: CleanupProgressUpdate) => void,
   ): Promise<CleanItemsResult> {
+    const local = await this.ensureLocal()
     await this.ensureScanned()
     const idSet = new Set(ids)
     const targeted = this.currentItems().filter((item) => idSet.has(item.id))
@@ -290,6 +374,7 @@ export class TauriStorageService implements StorageService {
     const session: CleanupSession = {
       id: nextId('cleanup'),
       completedAt: new Date().toISOString(),
+      source: 'manual',
       estimatedBytes,
       actualBytes: movedToTrashBytes,
       itemIds: successIds,
@@ -306,9 +391,13 @@ export class TauriStorageService implements StorageService {
       freedOnDiskBytes,
     }
 
-    this.local.history = [session, ...this.local.history]
-    this.local.schedule = { ...this.local.schedule, lastRunAt: session.completedAt }
-    this.persistLocal()
+    // Deliberately does NOT touch schedule.lastRunAt — that field now means
+    // specifically "last time the scheduled background job ran" (updated
+    // by the native side, see src-tauri/src/background.rs), not "last time
+    // anything happened." Conflating the two would make the Schedule
+    // screen misreport whether background scheduling is actually working.
+    local.history = [session, ...local.history]
+    await this.persistLocal()
 
     return {
       session,
@@ -321,11 +410,12 @@ export class TauriStorageService implements StorageService {
   }
 
   async excludeItem(id: string): Promise<CleanupItem[]> {
+    const local = await this.ensureLocal()
     const items = this.currentItems()
     const target = items.find((item) => item.id === id)
-    if (target && !this.local.settings.exclusions.includes(target.path)) {
-      this.local.settings = { ...this.local.settings, exclusions: [...this.local.settings.exclusions, target.path] }
-      this.persistLocal()
+    if (target && !local.settings.exclusions.includes(target.path)) {
+      local.settings = { ...local.settings, exclusions: [...local.settings.exclusions, target.path] }
+      await this.persistLocal()
     }
     return this.currentItems()
   }
@@ -392,34 +482,90 @@ export class TauriStorageService implements StorageService {
   }
 
   async getSchedule() {
-    return this.local.schedule
+    const local = await this.ensureLocal()
+    return local.schedule
   }
 
+  /**
+   * Installs/updates the native LaunchAgent when `rule.enabled`, or removes
+   * it when disabled — see src-tauri/src/schedule.rs. `nextRunAt` on the
+   * persisted/returned rule always reflects what the native side actually
+   * computed, never a value invented on the frontend.
+   */
   async saveSchedule(rule: ScheduleRule) {
-    this.local.schedule = rule
-    this.persistLocal()
-    return this.local.schedule
+    const local = await this.ensureLocal()
+    let resolved: ScheduleRule
+    if (rule.enabled) {
+      const nextRunAt = await installSchedule(rule.frequency, rule.timeOfDay)
+      resolved = { ...rule, nextRunAt }
+    } else {
+      await removeSchedule()
+      resolved = { ...rule, nextRunAt: null }
+    }
+    local.schedule = resolved
+    await this.persistLocal()
+    return local.schedule
+  }
+
+  /** Whether the LaunchAgent is actually loaded right now — a diagnostic, not the source of truth for `schedule.enabled`. */
+  async getScheduleStatus(): Promise<boolean> {
+    return bridgeGetScheduleStatus()
+  }
+
+  async getScanEvents(): Promise<ScanEvent[]> {
+    const local = await this.ensureLocal()
+    return local.scanEvents
   }
 
   async getHistory() {
-    return this.local.history
+    const local = await this.ensureLocal()
+    return local.history
   }
 
   async getSettings() {
-    return this.local.settings
+    const local = await this.ensureLocal()
+    return local.settings
   }
 
   async saveSettings(settings: Settings) {
-    this.local.settings = settings
-    this.persistLocal()
-    return this.local.settings
+    const local = await this.ensureLocal()
+    local.settings = settings
+    await this.persistLocal()
+    return local.settings
+  }
+
+  async getNotificationPermissionState(): Promise<PermissionState> {
+    return mapNotificationPermission(await bridgeGetNotificationPermissionState())
+  }
+
+  /**
+   * Triggers the OS permission flow. NOTE (verified by reading
+   * tauri-plugin-notification 2.4.0's desktop source): on macOS this
+   * currently always resolves to "granted" rather than reflecting a real
+   * user decision — a known upstream limitation, not something this app
+   * can see through. The "Open Notification Settings" button is offered
+   * unconditionally alongside this for exactly that reason — it's the only
+   * fully reliable way for the user to check/fix the real OS setting.
+   */
+  async requestNotificationPermission(): Promise<PermissionState> {
+    return mapNotificationPermission(await bridgeRequestNotificationPermission())
+  }
+
+  async openNotificationSettings(): Promise<void> {
+    await bridgeOpenNotificationSettings()
   }
 
   async resetDemoData(): Promise<void> {
-    localStorage.removeItem(STORAGE_KEY)
-    this.local = { settings: DEFAULT_SETTINGS, schedule: DEFAULT_SCHEDULE, history: [] }
+    try {
+      localStorage.removeItem(LEGACY_STORAGE_KEY)
+    } catch {
+      // ignore
+    }
+    await removeSchedule().catch(() => {})
+    this.local = { settings: DEFAULT_SETTINGS, schedule: DEFAULT_SCHEDULE, history: [], scanEvents: [] }
+    this.localPromise = Promise.resolve(this.local)
     this.scan = null
-    this.persistLocal()
+    await this.persistLocal()
   }
 }
 

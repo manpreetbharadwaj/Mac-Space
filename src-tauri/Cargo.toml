@@ -33,8 +33,13 @@ sha2 = "0.10"
 whoami = "1"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 trash = "5"
+tauri-plugin-notification = "2.4.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6.2"
+# Used only to pump the current thread's run loop briefly while waiting for
+# a UNUserNotificationCenter completion handler — see native_notifications.rs.
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["CFRunLoop", "CFDate", "CFBase", "std"] }
 # Used to read the same volume-capacity values macOS's own Storage settings
 # does (NSURLVolumeAvailableCapacityForImportantUsageKey), rather than raw
 # statfs, which reports free space differently (see src/disk.rs).
@@ -48,3 +53,4 @@ objc2-foundation = { version = "0.3", features = [
     "NSValue",
     "NSObject",
 ] }
+objc2-user-notifications = { version = "0.3.2", default-features = false, features = ["UNUserNotificationCenter", "UNNotificationRequest", "UNNotificationContent", "UNNotificationTrigger", "UNNotificationResponse", "UNNotification", "UNNotificationSettings", "UNError", "std", "block2"] }

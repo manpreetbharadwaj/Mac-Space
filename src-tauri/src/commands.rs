@@ -3,9 +3,11 @@ use crate::dto::{
 };
 use crate::trash::{TrashOperationResult, TrashRequestItem};
 use crate::{applications, browsers, dedup, developer, disk, scanner};
+use crate::{schedule, state};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
+use tauri_plugin_notification::{NotificationExt, PermissionState};
 
 const PROGRESS_EVENT: &str = "scan-progress";
 const CLEANUP_PROGRESS_EVENT: &str = "cleanup-progress";
@@ -74,7 +76,7 @@ pub fn open_full_disk_access_settings() -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-fn scan_all_files(home: &PathBuf) -> (Vec<ScannedFileDto>, Vec<ScanWarningDto>) {
+pub(crate) fn scan_all_files(home: &PathBuf) -> (Vec<ScannedFileDto>, Vec<ScanWarningDto>) {
     let mut files = Vec::new();
     let mut warnings = Vec::new();
 
@@ -230,4 +232,99 @@ pub async fn trash_items(app: AppHandle, items: Vec<TrashRequestItem>) -> Result
         overview_before,
         overview_after,
     })
+}
+
+/// Returns the full persisted app-state blob (settings/schedule/history/
+/// scanEvents) — see state.rs. The frontend owns the shape; Rust only reads
+/// a handful of fields out of it for the background scan job.
+#[tauri::command]
+pub fn get_app_state() -> serde_json::Value {
+    state::load_state()
+}
+
+/// Persists the full app-state blob as-is (last-writer-wins — the frontend
+/// always sends its complete current copy, matching how it previously
+/// wrote the whole blob to localStorage in one shot).
+#[tauri::command]
+pub fn save_app_state(state: serde_json::Value) -> Result<(), String> {
+    crate::state::save_state(&state)
+}
+
+/// Installs/replaces the LaunchAgent for the given frequency + time-of-day
+/// and returns the freshly computed `nextRunAt` (RFC3339) so the UI can
+/// show a real value immediately, without waiting for a background run.
+#[tauri::command]
+pub fn install_schedule(frequency: String, time_of_day: String) -> Result<String, String> {
+    schedule::install(&frequency, &time_of_day)?;
+    let next = schedule::calculate_next_run_at(&frequency, &time_of_day, chrono::Local::now())
+        .map(|d| d.to_rfc3339())
+        .ok_or_else(|| "Could not compute next run time".to_string())?;
+    Ok(next)
+}
+
+/// Unloads and removes the LaunchAgent (called when the user disables
+/// scheduling). Safe to call even if nothing is currently installed.
+#[tauri::command]
+pub fn remove_schedule() -> Result<(), String> {
+    schedule::remove()
+}
+
+/// Whether a schedule LaunchAgent is currently loaded — diagnostic only,
+/// shown in the Schedule screen so "should be enabled" and "is actually
+/// installed" can never silently drift apart without the user noticing.
+#[tauri::command]
+pub fn get_schedule_status() -> bool {
+    schedule::is_installed()
+}
+
+/// Re-points the installed LaunchAgent at the current executable if the app
+/// has moved since it was installed (e.g. dragged to a new location) —
+/// a no-op if nothing changed or nothing is installed. Called once at
+/// normal startup when a schedule is enabled.
+#[tauri::command]
+pub fn heal_schedule_path(frequency: String, time_of_day: String) {
+    schedule::reinstall_if_path_changed(&frequency, &time_of_day);
+}
+
+/// Best-effort notification permission read. IMPORTANT, verified by reading
+/// tauri-plugin-notification 2.4.0's desktop backend source: on macOS this
+/// always returns "granted" — the plugin does not currently query real
+/// UNUserNotificationCenter authorization status on desktop. Exposed
+/// honestly as-is; the frontend does not claim OS-level certainty from
+/// this value alone (see docs/scheduled-scans.md).
+#[tauri::command]
+pub fn get_notification_permission_state(app: AppHandle) -> Result<String, String> {
+    match app.notification().permission_state() {
+        Ok(PermissionState::Granted) => Ok("granted".to_string()),
+        Ok(PermissionState::Denied) => Ok("denied".to_string()),
+        Ok(_) => Ok("prompt".to_string()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+pub fn request_notification_permission(app: AppHandle) -> Result<String, String> {
+    match app.notification().request_permission() {
+        Ok(PermissionState::Granted) => Ok("granted".to_string()),
+        Ok(PermissionState::Denied) => Ok("denied".to_string()),
+        Ok(_) => Ok("prompt".to_string()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+pub fn open_notification_settings() -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.notifications")
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// Consumes (clears) the route a notification click resolved to, if any —
+/// called once by the frontend after it mounts. See native_notifications.rs
+/// for the full native click -> pending route -> frontend handoff.
+#[tauri::command]
+pub fn get_pending_notification_route() -> Option<String> {
+    crate::native_notifications::take_pending_route()
 }

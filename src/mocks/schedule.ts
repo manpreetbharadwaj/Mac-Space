@@ -9,12 +9,14 @@ export const scheduleRule: ScheduleRule = {
   enabled: true,
   frequency: 'weekly',
   mode: 'reminder',
+  timeOfDay: '09:00',
   safeCategories: ['developer', 'system', 'browser'],
   thresholdFreeGb: 40,
   thresholdReclaimableGb: 15,
   emailSummaryEnabled: false,
   lastRunAt: daysAgoIso(3),
   nextRunAt: nextRun.toISOString(),
+  autoCleanConsentVersion: 0,
 }
 
 export const defaultSettings: Settings = {

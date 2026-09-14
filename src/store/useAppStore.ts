@@ -6,7 +6,9 @@ import type {
   CleanupItem,
   CleanupSession,
   DiskSummary,
+  PermissionState,
   PermissionStatus,
+  ScanEvent,
   ScanSession,
   ScheduleRule,
   Settings,
@@ -16,6 +18,7 @@ import type {
 import { storageService, type CleanMode } from '@/services/storageService'
 import type { CleanupProgressUpdate, ScanProgressUpdate } from '@/services/storageServiceTypes'
 import { dataSource, type DataSource } from '@/services/environment'
+import { createInitStepsDone, type InitStepKey } from '@/lib/startupStages'
 
 export interface Toast {
   id: string
@@ -34,6 +37,8 @@ export interface LastCleanupResult {
 
 interface AppState {
   ready: boolean
+  /** Real (not simulated) per-call completion, driven by init() below — see src/lib/startupStages.ts. */
+  initStepsDone: Record<InitStepKey, boolean>
   dataSource: DataSource
   diskSummary: DiskSummary | null
   categories: StorageCategory[]
@@ -42,6 +47,11 @@ interface AppState {
   browserProfiles: BrowserProfile[]
   permissions: PermissionStatus[]
   schedule: ScheduleRule | null
+  /** Whether the native background scheduler is actually installed right now — see TauriStorageService.getScheduleStatus. Always false in mock mode's meaningful sense; mirrors schedule.enabled there. */
+  scheduleInstalled: boolean
+  scanEvents: ScanEvent[]
+  /** Best-effort — see the caveat on StorageService.getNotificationPermissionState. */
+  notificationPermission: PermissionState
   settings: Settings | null
   history: CleanupSession[]
   scanSession: ScanSession | null
@@ -63,6 +73,9 @@ interface AppState {
   revealInFinder: (path: string) => Promise<void>
   uninstallApp: (id: string) => Promise<void>
   saveSchedule: (rule: ScheduleRule) => Promise<void>
+  refreshScanEvents: () => Promise<void>
+  requestNotificationPermission: () => Promise<void>
+  openNotificationSettings: () => Promise<void>
   saveSettings: (settings: Settings) => Promise<void>
   requestPermission: (category: PermissionStatus['category']) => Promise<void>
   resetDemoData: () => Promise<void>
@@ -83,6 +96,7 @@ async function refreshCore(set: (partial: Partial<AppState>) => void) {
 
 export const useAppStore = create<AppState>((set, get) => ({
   ready: false,
+  initStepsDone: createInitStepsDone(),
   dataSource,
   diskSummary: null,
   categories: [],
@@ -91,6 +105,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   browserProfiles: [],
   permissions: [],
   schedule: null,
+  scheduleInstalled: false,
+  scanEvents: [],
+  notificationPermission: 'not-requested',
   settings: null,
   history: [],
   scanSession: null,
@@ -101,19 +118,46 @@ export const useAppStore = create<AppState>((set, get) => ({
   lastCleanupResult: null,
 
   init: async () => {
-    const [diskSummary, categories, cleanupItems, applications, browserProfiles, permissions, schedule, settings, history, scanSession] =
-      await Promise.all([
-        storageService.getDiskSummary(),
-        storageService.getCategories(),
-        storageService.getCleanupItems(),
-        storageService.getApplications(),
-        storageService.getBrowserProfiles(),
-        storageService.getPermissions(),
-        storageService.getSchedule(),
-        storageService.getSettings(),
-        storageService.getHistory(),
-        storageService.getScanSession(),
-      ])
+    // Marks each step done the instant its real call resolves — purely
+    // additive instrumentation for the startup screen's progress copy; it
+    // changes no timing, ordering, or result of the calls themselves. See
+    // src/lib/startupStages.ts for how this becomes status text.
+    const markDone = (key: InitStepKey) => set((s) => ({ initStepsDone: { ...s.initStepsDone, [key]: true } }))
+    const track = <T,>(key: InitStepKey, promise: Promise<T>): Promise<T> =>
+      promise.then((value) => {
+        markDone(key)
+        return value
+      })
+
+    const [
+      diskSummary,
+      categories,
+      cleanupItems,
+      applications,
+      browserProfiles,
+      permissions,
+      schedule,
+      settings,
+      history,
+      scanSession,
+      scheduleInstalled,
+      scanEvents,
+      notificationPermission,
+    ] = await Promise.all([
+      track('disk', storageService.getDiskSummary()),
+      track('categories', storageService.getCategories()),
+      track('cleanupItems', storageService.getCleanupItems()),
+      track('applications', storageService.getApplications()),
+      track('browserProfiles', storageService.getBrowserProfiles()),
+      track('permissions', storageService.getPermissions()),
+      track('schedule', storageService.getSchedule()),
+      track('settings', storageService.getSettings()),
+      track('history', storageService.getHistory()),
+      track('scanSession', storageService.getScanSession()),
+      track('scheduleInstalled', storageService.getScheduleStatus()),
+      track('scanEvents', storageService.getScanEvents()),
+      track('notificationPermission', storageService.getNotificationPermissionState()),
+    ])
     set({
       diskSummary,
       categories,
@@ -125,6 +169,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       settings,
       history,
       scanSession,
+      scheduleInstalled,
+      scanEvents,
+      notificationPermission,
       ready: true,
     })
   },
@@ -139,6 +186,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       diskSummary: result.diskSummary,
       selectedIds: new Set(),
     })
+    await get().refreshScanEvents()
   },
 
   toggleSelect: (id) => {
@@ -245,8 +293,26 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   saveSchedule: async (rule) => {
     const schedule = await storageService.saveSchedule(rule)
-    set({ schedule })
-    get().pushToast('Schedule saved.', 'success')
+    const scheduleInstalled = await storageService.getScheduleStatus()
+    set({ schedule, scheduleInstalled })
+    get().pushToast(
+      schedule.enabled ? 'Schedule saved — background scans are on.' : 'Scheduled scans turned off.',
+      'success',
+    )
+  },
+
+  refreshScanEvents: async () => {
+    const scanEvents = await storageService.getScanEvents()
+    set({ scanEvents })
+  },
+
+  requestNotificationPermission: async () => {
+    const notificationPermission = await storageService.requestNotificationPermission()
+    set({ notificationPermission })
+  },
+
+  openNotificationSettings: async () => {
+    await storageService.openNotificationSettings()
   },
 
   saveSettings: async (settings) => {

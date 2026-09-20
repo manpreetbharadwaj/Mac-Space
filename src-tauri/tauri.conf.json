@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Mac Storage Manager",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "identifier": "com.macstoragemanager.app",
   "build": {
     "frontendDist": "../dist",
@@ -38,6 +38,11 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    },
+    "macOS": {
+      "signingIdentity": "-",
+      "minimumSystemVersion": "11.0",
+      "entitlements": "Entitlements.plist"
     }
   },
   "plugins": {

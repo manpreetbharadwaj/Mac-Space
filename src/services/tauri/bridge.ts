@@ -97,3 +97,10 @@ export function getPendingNotificationRoute(): Promise<string | null> {
 export function onNotificationRoute(callback: (route: string) => void): Promise<UnlistenFn> {
   return listen<string>('notification-route', (e) => callback(e.payload))
 }
+
+// --- External links — see src-tauri/src/external_url.rs ---
+
+/** Opens an allowlisted https link in the user's default browser; rejects with a readable message otherwise. */
+export function openExternalUrl(url: string): Promise<void> {
+  return invoke('open_external_url', { url })
+}

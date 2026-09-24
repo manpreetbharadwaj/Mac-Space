@@ -312,6 +312,12 @@ pub fn request_notification_permission(app: AppHandle) -> Result<String, String>
     }
 }
 
+/// Opens an allowlisted https link in the default browser — see external_url.rs.
+#[tauri::command]
+pub fn open_external_url(url: String) -> Result<(), String> {
+    crate::external_url::open(&url)
+}
+
 #[tauri::command]
 pub fn open_notification_settings() -> Result<(), String> {
     std::process::Command::new("open")

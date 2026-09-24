@@ -97,7 +97,12 @@ fn set_pending_route(route: &str) {
 /// for both the GUI and `--background-scan` invocations of it alike — so
 /// every entry point below checks it first and no-ops instead of crashing.
 fn has_real_app_bundle() -> bool {
-    !tauri::is_dev()
+    // `is_dev()` alone is not enough: a release-compiled binary run outside
+    // a bundle (copied out of the .app, or launched from target/release/)
+    // still makes `currentNotificationCenter` throw an uncatchable
+    // NSAssertion -> SIGABRT (seen in a real crash report). Require an
+    // actual `.app/Contents/MacOS/` path too.
+    !tauri::is_dev() && crate::diagnostics::current_install_location() != crate::diagnostics::InstallLocation::NotABundle
 }
 
 pub fn request_authorization() {

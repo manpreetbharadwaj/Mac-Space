@@ -98,10 +98,14 @@ fn build_plist_xml(executable: &str, frequency: &str, hour: u32, minute: u32, no
 /// startup, every schedule save) never creates duplicate jobs.
 pub fn install(frequency: &str, time_of_day: &str) -> Result<(), String> {
     let (hour, minute) = parse_time_of_day(time_of_day).ok_or_else(|| format!("Invalid time_of_day: {time_of_day}"))?;
-    let executable = std::env::current_exe()
-        .map_err(|e| e.to_string())?
-        .to_string_lossy()
-        .to_string();
+    let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
+    if crate::diagnostics::classify_install_location(&exe_path).is_ephemeral() {
+        // A translocated/DMG path vanishes on relaunch or eject, which would
+        // leave a LaunchAgent that silently never runs.
+        log::warn!("Refusing to install the schedule LaunchAgent from a temporary location: {}", exe_path.display());
+        return Err("Mac Storage Manager is running from a disk image or your Downloads folder. Drag it into your Applications folder, open it from there, then turn scheduling on.".to_string());
+    }
+    let executable = exe_path.to_string_lossy().to_string();
     let path = plist_path().ok_or("Could not determine LaunchAgents directory")?;
     let dir = launch_agents_dir().ok_or("Could not determine LaunchAgents directory")?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -151,6 +155,10 @@ pub fn is_installed() -> bool {
 /// (there's no way to self-heal after deletion — see docs/scheduled-scans.md).
 pub fn reinstall_if_path_changed(frequency: &str, time_of_day: &str) {
     let Ok(current) = std::env::current_exe() else { return };
+    if crate::diagnostics::classify_install_location(&current).is_ephemeral() {
+        log::warn!("Not re-pointing the schedule LaunchAgent at a temporary location: {}", current.display());
+        return;
+    }
     let Some(path) = plist_path() else { return };
     let Ok(existing_xml) = fs::read_to_string(&path) else {
         // Nothing installed yet — nothing to heal.

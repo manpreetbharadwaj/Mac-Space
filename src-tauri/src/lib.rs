@@ -5,8 +5,10 @@ mod browsers;
 mod commands;
 mod dedup;
 mod developer;
+mod diagnostics;
 mod disk;
 mod dto;
+mod external_url;
 mod native_notifications;
 mod scanner;
 mod schedule;
@@ -15,6 +17,11 @@ mod trash;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // First thing, before any branch below: a panic anywhere (GUI, headless
+    // scan, diagnostics) is appended to startup-crash.log even if the normal
+    // logger never got initialized.
+    diagnostics::install_panic_hook();
+
     // Headless mode: launchd invokes this same binary with this flag (see
     // schedule.rs). No window, no webview — just a scan + maybe a
     // notification, then exit. Checked before touching `tauri::Builder` at
@@ -57,13 +64,17 @@ pub fn run() {
 
     tauri::Builder::default()
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            // Always on (not just in debug builds): a shipped build that
+            // fails to open must leave a trace in
+            // ~/Library/Logs/com.macstoragemanager.app/. The plugin's
+            // default rotation keeps a single file; the size cap bounds it.
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .max_file_size(512 * 1024)
+                    .build(),
+            )?;
+            diagnostics::log_startup_banner(&app.package_info().version.to_string());
             // Registers this process as the UNUserNotificationCenter
             // delegate so a notification click — whether this app was
             // already running or just got launched by the click itself —
@@ -92,6 +103,7 @@ pub fn run() {
             commands::get_notification_permission_state,
             commands::request_notification_permission,
             commands::open_notification_settings,
+            commands::open_external_url,
             commands::get_pending_notification_route,
         ])
         .run(tauri::generate_context!())

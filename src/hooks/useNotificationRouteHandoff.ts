@@ -9,7 +9,7 @@ import { getPendingNotificationRoute, onNotificationRoute } from '@/services/tau
  * first; this is defense-in-depth, not the only check). Never navigate to a
  * route string taken from a notification payload without going through this.
  */
-const ALLOWED_ROUTES = ['/dashboard', '/cleanup', '/scan', '/schedule', '/settings', '/history'] as const
+const ALLOWED_ROUTES = ['/dashboard', '/cleanup', '/scan', '/schedule', '/settings', '/history', '/performance', '/health'] as const
 const FALLBACK_ROUTE = '/dashboard'
 
 function toSafeRoute(route: string): string {

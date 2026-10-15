@@ -13,6 +13,8 @@ import { useUpdateStore } from '@/store/useUpdateStore'
 import { useThemeSync } from '@/hooks/useThemeSync'
 import { useUpdateLifecycle } from '@/hooks/useUpdateLifecycle'
 import { useNotificationRouteHandoff } from '@/hooks/useNotificationRouteHandoff'
+import { usePerformanceMonitorSync } from '@/hooks/usePerformanceMonitorSync'
+import { useLanguageSync } from '@/i18n'
 
 /** How long the storage ring gets to settle into real category proportions before the startup screen recedes — see StartupScreen's `revealed` prop. Not a data-loading delay: `ready` (and the real dashboard mounting behind it) already happened by the time this timer starts. */
 const SETTLE_MS = 550
@@ -36,6 +38,10 @@ export function AppShell() {
   // must run regardless of `ready`/maintenance state below so a route from a
   // cold-launch notification click is never missed.
   useNotificationRouteHandoff()
+  // <html lang/dir> follows the chosen language (Arabic → right-to-left).
+  useLanguageSync()
+  // Pushes monitoring/alert preferences to the native monitor whenever they change.
+  usePerformanceMonitorSync()
 
   useEffect(() => {
     init()

@@ -11,6 +11,8 @@ import { Schedule } from '@/routes/Schedule'
 import { HistoryPage } from '@/routes/History'
 import { SettingsPage } from '@/routes/Settings'
 import { Download } from '@/routes/Download'
+import { PerformancePage } from '@/routes/Performance'
+import { MacHealthPage } from '@/routes/MacHealth'
 
 export default function App() {
   return (
@@ -25,6 +27,8 @@ export default function App() {
           <Route path="/browsers" element={<Browsers />} />
           <Route path="/applications" element={<Applications />} />
           <Route path="/files" element={<Files />} />
+          <Route path="/performance" element={<PerformancePage />} />
+          <Route path="/health" element={<MacHealthPage />} />
           <Route path="/schedule" element={<Schedule />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/settings" element={<SettingsPage />} />

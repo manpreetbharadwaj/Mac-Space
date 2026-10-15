@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { CleanupItemRow } from '@/components/cleanup/CleanupItemRow'
 import { useAppStore } from '@/store/useAppStore'
 import type { SafetyLevel, StorageCategoryId } from '@/types'
+import { useI18n } from '@/i18n'
 
 type SortKey = 'size' | 'age' | 'safety' | 'category' | 'name'
 const SAFETY_ORDER: Record<SafetyLevel, number> = { red: 0, orange: 1, green: 2 }
@@ -19,6 +20,7 @@ export function Cleanup() {
   const selectIds = useAppStore((s) => s.selectIds)
   const clearSelection = useAppStore((s) => s.clearSelection)
   const smartSelect = useAppStore((s) => s.smartSelect)
+  const { t } = useI18n()
 
   const [safetyFilter, setSafetyFilter] = useState<SafetyLevel | 'all'>('all')
   const [sortKey, setSortKey] = useState<SortKey>('size')
@@ -65,12 +67,12 @@ export function Cleanup() {
   return (
     <div className="space-y-5 pb-24">
       <PageHeader
-        title="Cleanup"
-        description="Every recommendation shows why it exists and what happens if you clean it — nothing is removed without your review."
+        title={t('nav.cleanup')}
+        description={t('clean.description')}
         actions={
           <Button variant="secondary" onClick={smartSelect}>
             <Sparkles size={14} />
-            Smart Select
+            {t('clean.smartSelect')}
           </Button>
         }
       />
@@ -86,11 +88,11 @@ export function Cleanup() {
                 : 'border-border text-text-muted hover:text-text'
             }`}
           >
-            {level === 'all' ? 'All' : level === 'green' ? 'Safe' : level === 'orange' ? 'Review' : 'Protected'}
+            {level === 'all' ? t('clean.all') : t(`safety.${level}`)}
           </button>
         ))}
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ms-auto flex flex-wrap items-center gap-2">
           {categoryFilter !== 'all' && (
             <button
               onClick={() => {
@@ -98,9 +100,10 @@ export function Cleanup() {
                 next.delete('category')
                 setParams(next)
               }}
+              aria-label={t('clean.clearCategory')}
               className="rounded-full border border-border-strong bg-surface-2 px-3 py-1.5 text-[12px] text-text-muted hover:text-text"
             >
-              Category: {categoryFilter} ✕
+              {t('clean.categoryChip', { category: t(`cat.${categoryFilter}`) })} ✕
             </button>
           )}
           <select
@@ -108,24 +111,24 @@ export function Cleanup() {
             onChange={(e) => setSortKey(e.target.value as SortKey)}
             className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[12px] text-text-muted"
           >
-            <option value="size">Sort: Size</option>
-            <option value="age">Sort: Last used</option>
-            <option value="safety">Sort: Risk</option>
-            <option value="category">Sort: Category</option>
-            <option value="name">Sort: Name</option>
+            <option value="size">{t('clean.sort.size')}</option>
+            <option value="age">{t('clean.sort.age')}</option>
+            <option value="safety">{t('clean.sort.safety')}</option>
+            <option value="category">{t('clean.sort.category')}</option>
+            <option value="name">{t('clean.sort.name')}</option>
           </select>
           <button
             onClick={selectAllVisible}
             className="rounded-lg border border-border px-2.5 py-1.5 text-[12px] font-medium text-text-muted hover:text-text"
           >
-            Select all visible
+            {t('clean.selectAllVisible')}
           </button>
           {selectedIds.size > 0 && (
             <button
               onClick={clearSelection}
               className="rounded-lg border border-border px-2.5 py-1.5 text-[12px] font-medium text-text-muted hover:text-text"
             >
-              Clear
+              {t('clean.clear')}
             </button>
           )}
         </div>
@@ -136,8 +139,8 @@ export function Cleanup() {
           <CardBody>
             <EmptyState
               icon={ShieldCheck}
-              title="Nothing to clean here"
-              description="Try a different filter, or run a new scan to look for more opportunities."
+              title={t('clean.emptyTitle')}
+              description={t('clean.emptyBody')}
             />
           </CardBody>
         ) : (

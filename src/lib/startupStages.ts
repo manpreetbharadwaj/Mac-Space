@@ -38,23 +38,26 @@ export const INIT_STEP_KEYS: InitStepKey[] = [
   'scanEvents',
 ]
 
+import type { MessageKey } from '@/i18n/core'
+
 interface StageGroup {
   keys: InitStepKey[]
-  label: string
+  label: MessageKey
 }
 
 const STAGE_GROUPS: StageGroup[] = [
-  { keys: ['disk'], label: 'Reading storage information…' },
-  { keys: ['categories', 'cleanupItems'], label: 'Analyzing storage categories…' },
-  { keys: ['applications'], label: 'Checking installed applications…' },
-  { keys: ['browserProfiles'], label: 'Checking browser data…' },
-  { keys: ['permissions', 'notificationPermission'], label: 'Checking permissions…' },
-  { keys: ['schedule', 'settings', 'history', 'scanSession', 'scheduleInstalled', 'scanEvents'], label: 'Loading your preferences…' },
+  { keys: ['disk'], label: 'startup.disk' },
+  { keys: ['categories', 'cleanupItems'], label: 'startup.categories' },
+  { keys: ['applications'], label: 'startup.applications' },
+  { keys: ['browserProfiles'], label: 'startup.browsers' },
+  { keys: ['permissions', 'notificationPermission'], label: 'startup.permissions' },
+  { keys: ['schedule', 'settings', 'history', 'scanSession', 'scheduleInstalled', 'scanEvents'], label: 'startup.preferences' },
 ]
 
-const FINAL_LABEL = 'Preparing your dashboard…'
+const FINAL_LABEL: MessageKey = 'startup.final'
 
-export function deriveStartupLabel(done: Record<InitStepKey, boolean>): string {
+/** Returns a translation key — StartupScreen renders it in the active language. */
+export function deriveStartupLabel(done: Record<InitStepKey, boolean>): MessageKey {
   for (const group of STAGE_GROUPS) {
     if (group.keys.some((key) => !done[key])) return group.label
   }

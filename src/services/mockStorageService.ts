@@ -12,6 +12,8 @@ import type {
   Settings,
   StorageCategory,
 } from '@/types'
+import { normalizeSettings } from '@/lib/settingsDefaults'
+import { defaultSettings } from '@/mocks/schedule'
 import { buildCategories, buildDiskSummary, buildInitialScanSession, createSeedData } from '@/mocks'
 import { nextId } from '@/mocks/seed'
 import type { CleanItemsResult, CleanMode, RunScanResult, StorageService } from './storageServiceTypes'
@@ -37,7 +39,10 @@ function delay(ms: number): Promise<void> {
 function loadPersisted(): PersistedState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw) as PersistedState
+    if (raw) {
+      const parsed = JSON.parse(raw) as PersistedState
+      return { ...parsed, settings: normalizeSettings(parsed.settings, defaultSettings) }
+    }
   } catch {
     // fall through to fresh seed
   }

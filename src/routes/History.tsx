@@ -5,9 +5,10 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Card, CardBody } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { useAppStore } from '@/store/useAppStore'
-import { bytesToGb, formatBytes, formatDate } from '@/lib/format'
+import { bytesToGb } from '@/lib/format'
+import { useI18n } from '@/i18n'
 import { biggestSingleCleanup, sumSavedLifetime, sumSavedWithin } from '@/lib/historyStats'
-import { CATEGORY_LABELS } from '@/mocks'
+import { DASHBOARD_CATEGORY_ORDER } from '@/mocks'
 import type { StorageCategoryId } from '@/types'
 import { clsx } from 'clsx'
 
@@ -17,6 +18,8 @@ export function HistoryPage() {
   const history = useAppStore((s) => s.history)
   const [range, setRange] = useState<RangeFilter>('all')
   const [categoryFilter, setCategoryFilter] = useState<StorageCategoryId | 'all'>('all')
+  const { t, tp, fmt } = useI18n()
+  const formatBytes = (b: number) => fmt.bytes(b)
 
   const filtered = useMemo(() => {
     let list = [...history]
@@ -35,10 +38,10 @@ export function HistoryPage() {
       [...history]
         .sort((a, b) => new Date(a.completedAt).getTime() - new Date(b.completedAt).getTime())
         .map((s) => ({
-          date: formatDate(s.completedAt),
+          date: fmt.date(s.completedAt),
           gb: Number(bytesToGb(s.actualBytes).toFixed(1)),
         })),
-    [history],
+    [history, fmt],
   )
 
   const lifetime = sumSavedLifetime(history)
@@ -48,15 +51,15 @@ export function HistoryPage() {
   return (
     <div className="space-y-5 pb-16">
       <PageHeader
-        title="History & Savings"
-        description="Every cleanup is logged locally — see how much space you've reclaimed and where it came from."
+        title={t('hist.title')}
+        description={t('hist.description')}
       />
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Card>
           <CardBody>
             <p className="flex items-center gap-1.5 text-[11px] text-text-faint">
-              <Trophy size={12} /> Lifetime saved
+              <Trophy size={12} /> {t('hist.lifetime')}
             </p>
             <p className="mt-1 text-lg font-semibold text-text">{formatBytes(lifetime)}</p>
           </CardBody>
@@ -64,7 +67,7 @@ export function HistoryPage() {
         <Card>
           <CardBody>
             <p className="flex items-center gap-1.5 text-[11px] text-text-faint">
-              <Calendar size={12} /> This month
+              <Calendar size={12} /> {t('hist.thisMonth')}
             </p>
             <p className="mt-1 text-lg font-semibold text-text">{formatBytes(thisMonth)}</p>
           </CardBody>
@@ -72,15 +75,15 @@ export function HistoryPage() {
         <Card>
           <CardBody>
             <p className="flex items-center gap-1.5 text-[11px] text-text-faint">
-              <ListChecks size={12} /> Cleanups run
+              <ListChecks size={12} /> {t('hist.runs')}
             </p>
-            <p className="mt-1 text-lg font-semibold text-text">{history.length}</p>
+            <p className="mt-1 text-lg font-semibold text-text">{fmt.number(history.length)}</p>
           </CardBody>
         </Card>
         <Card>
           <CardBody>
             <p className="flex items-center gap-1.5 text-[11px] text-text-faint">
-              <Sparkles size={12} /> Biggest cleanup
+              <Sparkles size={12} /> {t('hist.biggest')}
             </p>
             <p className="mt-1 text-lg font-semibold text-text">{biggest ? formatBytes(biggest.actualBytes) : '—'}</p>
           </CardBody>
@@ -90,8 +93,8 @@ export function HistoryPage() {
       {chartData.length > 1 && (
         <Card>
           <CardBody>
-            <p className="mb-3 text-[13px] font-medium text-text-muted">Storage saved over time (GB per cleanup)</p>
-            <div className="h-52 w-full">
+            <p className="mb-3 text-[13px] font-medium text-text-muted">{t('hist.chartTitle')}</p>
+            <div className="h-52 w-full" dir="ltr">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
                   <defs>
@@ -109,7 +112,7 @@ export function HistoryPage() {
                       borderRadius: 10,
                       fontSize: 12,
                     }}
-                    formatter={(value) => [`${value} GB`, 'Saved']}
+                    formatter={(value) => [fmt.bytes(Number(value) * 1e9), t('hist.saved')]}
                   />
                   <Area type="monotone" dataKey="gb" stroke="var(--color-accent)" strokeWidth={2} fill="url(#savedGradient)" />
                 </AreaChart>
@@ -129,7 +132,7 @@ export function HistoryPage() {
               range === r ? 'border-accent bg-accent-soft text-accent' : 'border-border text-text-muted hover:text-text',
             )}
           >
-            {r === 'all' ? 'All time' : `Last ${r} days`}
+            {r === 'all' ? t('hist.allTime') : t('hist.lastDays', { days: fmt.number(Number(r)) })}
           </button>
         ))}
         <select
@@ -137,10 +140,10 @@ export function HistoryPage() {
           onChange={(e) => setCategoryFilter(e.target.value as StorageCategoryId | 'all')}
           className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[12px] text-text-muted"
         >
-          <option value="all">All categories</option>
-          {Object.entries(CATEGORY_LABELS).map(([id, label]) => (
+          <option value="all">{t('hist.allCategories')}</option>
+          {DASHBOARD_CATEGORY_ORDER.map((id) => (
             <option key={id} value={id}>
-              {label}
+              {t(`cat.${id}`)}
             </option>
           ))}
         </select>
@@ -149,7 +152,7 @@ export function HistoryPage() {
       {filtered.length === 0 ? (
         <Card>
           <CardBody>
-            <EmptyState icon={ListChecks} title="No cleanup sessions yet" description="Run your first cleanup to start building history." />
+            <EmptyState icon={ListChecks} title={t('hist.emptyTitle')} description={t('hist.emptyBody')} />
           </CardBody>
         </Card>
       ) : (
@@ -159,36 +162,36 @@ export function HistoryPage() {
               <CardBody className="flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <div className="flex items-center gap-2">
-                    <p className="text-[13px] font-medium text-text">{formatDate(session.completedAt)}</p>
+                    <p className="text-[13px] font-medium text-text">{fmt.date(session.completedAt)}</p>
                     {session.source === 'scheduled-auto-clean' && (
                       <span className="rounded-full bg-safe-soft px-2 py-0.5 text-[10px] font-medium text-safe">
-                        Auto-clean
+                        {t('hist.autoClean')}
                       </span>
                     )}
                   </div>
                   <p className="text-[12px] text-text-faint">
-                    {session.itemCount} item{session.itemCount === 1 ? '' : 's'} cleaned
+                    {tp('cleaned', session.itemCount)}
                     {!!session.failureCount && session.failureCount > 0 && (
-                      <span className="text-review"> · {session.failureCount} failed</span>
+                      <span className="text-review"> · {t('hist.failed', { count: fmt.number(session.failureCount) })}</span>
                     )}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {session.categoryBreakdown.map((c) => (
                     <span key={c.category} className="rounded-full bg-surface-2 px-2 py-0.5 text-[11px] text-text-muted">
-                      {CATEGORY_LABELS[c.category]} · {formatBytes(c.bytes)}
+                      {t(`cat.${c.category}`)} · {formatBytes(c.bytes)}
                     </span>
                   ))}
                 </div>
-                <div className="flex items-center gap-4 text-right">
+                <div className="flex items-center gap-4 text-end">
                   <div>
-                    <p className="text-[11px] text-text-faint">Before → After</p>
+                    <p className="text-[11px] text-text-faint">{t('hist.beforeAfter')}</p>
                     <p className="text-[12px] text-text-muted">
                       {formatBytes(session.beforeUsedBytes)} → {formatBytes(session.afterUsedBytes)}
                     </p>
                   </div>
                   <div>
-                    <p className="text-[11px] text-text-faint">Reclaimed</p>
+                    <p className="text-[11px] text-text-faint">{t('hist.reclaimed')}</p>
                     <p className="text-[14px] font-semibold text-safe">{formatBytes(session.actualBytes)}</p>
                   </div>
                 </div>

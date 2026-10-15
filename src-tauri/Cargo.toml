@@ -25,7 +25,10 @@ tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
-sysinfo = "0.33"
+# `multithread` (rayon) left off: refreshing ~700 processes takes ~20 ms on
+# one thread, and the parallel pool's spin-waiting cost more CPU than it
+# saved for the background performance monitor (measured; see performance.rs).
+sysinfo = { version = "0.33", default-features = false, features = ["system", "disk", "user", "component", "network"] }
 walkdir = "2"
 dirs = "5"
 plist = "1"
@@ -35,6 +38,8 @@ chrono = { version = "0.4", default-features = false, features = ["std", "clock"
 trash = "5"
 tauri-plugin-notification = "2.4.0"
 url = "2"
+base64 = "0.22"
+libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6.2"
@@ -53,5 +58,13 @@ objc2-foundation = { version = "0.3", features = [
     "NSString",
     "NSValue",
     "NSObject",
+    "NSProcessInfo",
+    "NSGeometry",
 ] }
+# Performance + Mac Health (see processes.rs, iokit.rs, device_health.rs,
+# login_item.rs): running-app list/icons/termination, IOKit registry and
+# IOPowerSources via CoreFoundation types, and SMAppService for launch at login.
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSRunningApplication", "NSWorkspace", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSGraphicsContext", "NSGraphics", "objc2-core-foundation", "libc"] }
+core-foundation = "0.10"
+objc2-service-management = { version = "0.3.2", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
 objc2-user-notifications = { version = "0.3.2", default-features = false, features = ["UNUserNotificationCenter", "UNNotificationRequest", "UNNotificationContent", "UNNotificationTrigger", "UNNotificationResponse", "UNNotification", "UNNotificationSettings", "UNError", "std", "block2"] }

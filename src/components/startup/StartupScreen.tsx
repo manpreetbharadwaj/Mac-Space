@@ -4,6 +4,7 @@ import type { StorageCategory } from '@/types'
 import type { InitStepKey } from '@/lib/startupStages'
 import { deriveStartupLabel } from '@/lib/startupStages'
 import { StorageRing } from './StorageRing'
+import { useI18n } from '@/i18n'
 
 const EASE_OUT: [number, number, number, number] = [0.22, 1, 0.36, 1]
 const EASE_IN: [number, number, number, number] = [0.5, 0, 1, 1]
@@ -27,7 +28,8 @@ export function StartupScreen({
   initStepsDone: Record<InitStepKey, boolean>
 }) {
   const reducedMotion = useReducedMotion() ?? false
-  const label = revealed ? 'Preparing your dashboard…' : deriveStartupLabel(initStepsDone)
+  const { t } = useI18n()
+  const label = t(revealed ? 'startup.final' : deriveStartupLabel(initStepsDone))
 
   return (
     <motion.div

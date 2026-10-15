@@ -1,4 +1,5 @@
 import { motion, useReducedMotion } from 'framer-motion'
+import { useI18n } from '@/i18n'
 import { clsx } from 'clsx'
 
 type Tone = 'default' | 'danger'
@@ -30,6 +31,9 @@ export function PremiumSwitch({
   disabled?: boolean
 }) {
   const reducedMotion = useReducedMotion() ?? false
+  // Mirrored in right-to-left languages, like native macOS switches.
+  const { dir } = useI18n()
+  const onOffset = dir === 'rtl' ? -16 : 16
   const isDanger = tone === 'danger' && checked
 
   return (
@@ -61,9 +65,9 @@ export function PremiumSwitch({
       )}
     >
       <motion.span
-        className="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white"
+        className="absolute start-0.5 top-0.5 h-4 w-4 rounded-full bg-white"
         style={{ boxShadow: '0 1px 2.5px 0 rgb(0 0 0 / 0.35), 0 0 0 0.5px rgb(0 0 0 / 0.06)' }}
-        animate={{ x: checked ? 16 : 0 }}
+        animate={{ x: checked ? onOffset : 0 }}
         transition={reducedMotion ? { duration: 0 } : { type: 'spring', stiffness: 620, damping: 34 }}
       />
     </button>

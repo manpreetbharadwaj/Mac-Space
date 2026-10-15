@@ -4,14 +4,15 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/Card'
 import { CleanupItemRow } from '@/components/cleanup/CleanupItemRow'
 import { useAppStore } from '@/store/useAppStore'
-import { formatBytes } from '@/lib/format'
+import { useI18n } from '@/i18n'
 
 function ProtectedChip({ icon: Icon, label, count }: { icon: typeof Lock; label: string; count: number | null }) {
+  const { t, fmt } = useI18n()
   return (
     <div className="flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-2">
       <Icon size={14} className="text-text-faint" />
       <div>
-        <p className="text-[12px] font-medium text-text">{count === null ? 'Not scanned' : count.toLocaleString()}</p>
+        <p className="text-[12px] font-medium text-text">{count === null ? t('brw.notScanned') : fmt.number(count)}</p>
         <p className="text-[10px] text-text-faint">{label}</p>
       </div>
     </div>
@@ -23,6 +24,7 @@ export function Browsers() {
   const cleanupItems = useAppStore((s) => s.cleanupItems)
   const selectIds = useAppStore((s) => s.selectIds)
   const autoSelected = useRef(false)
+  const { t, td, fmt } = useI18n()
 
   useEffect(() => {
     if (autoSelected.current) return
@@ -37,8 +39,8 @@ export function Browsers() {
   return (
     <div className="space-y-5 pb-16">
       <PageHeader
-        title="Browser Cleanup"
-        description="Cache is safe to clean and preselected below. Cookies and sessions need your review — passwords, bookmarks, and extensions are never touched."
+        title={t('brw.title')}
+        description={t('brw.description')}
       />
 
       {browserProfiles.map((browser) => {
@@ -55,11 +57,11 @@ export function Browsers() {
                 </div>
                 <div>
                   <CardTitle>{browser.name}</CardTitle>
-                  <p className="text-[12px] text-text-faint">Last cleaned: {browser.lastCleanedLabel}</p>
+                  <p className="text-[12px] text-text-faint">{t('brw.lastCleaned', { value: td(browser.lastCleanedLabel) })}</p>
                 </div>
               </div>
               <p className="text-[13px] font-medium text-text">
-                {formatBytes(browser.cacheBytes + browser.cookiesBytes)} total
+                {t('brw.total', { size: fmt.bytes(browser.cacheBytes + browser.cookiesBytes) })}
               </p>
             </CardHeader>
             <div className="mt-3 border-t border-border">
@@ -69,12 +71,12 @@ export function Browsers() {
             </div>
 
             <CardBody>
-              <p className="mb-2 text-[12px] font-medium text-text-muted">What will not be deleted</p>
+              <p className="mb-2 text-[12px] font-medium text-text-muted">{t('brw.notDeleted')}</p>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <ProtectedChip icon={KeyRound} label="Passwords" count={browser.passwordsCount} />
-                <ProtectedChip icon={Bookmark} label="Bookmarks" count={browser.bookmarksCount} />
-                <ProtectedChip icon={Type} label="Autofill entries" count={browser.autofillEntries} />
-                <ProtectedChip icon={Puzzle} label="Extensions" count={browser.extensionsCount} />
+                <ProtectedChip icon={KeyRound} label={t('brw.passwords')} count={browser.passwordsCount} />
+                <ProtectedChip icon={Bookmark} label={t('brw.bookmarks')} count={browser.bookmarksCount} />
+                <ProtectedChip icon={Type} label={t('brw.autofill')} count={browser.autofillEntries} />
+                <ProtectedChip icon={Puzzle} label={t('brw.extensions')} count={browser.extensionsCount} />
               </div>
             </CardBody>
           </Card>

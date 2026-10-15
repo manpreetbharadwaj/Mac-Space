@@ -49,7 +49,7 @@ use tauri::{AppHandle, Emitter, Manager};
 /// Routes a notification click may navigate to. Anything else (unknown,
 /// malformed, or absent) falls back to `FALLBACK_ROUTE` — see
 /// `validate_route`. Keep in sync with the routes declared in `src/App.tsx`.
-const ALLOWED_ROUTES: &[&str] = &["/dashboard", "/cleanup", "/scan", "/schedule", "/settings", "/history"];
+const ALLOWED_ROUTES: &[&str] = &["/dashboard", "/cleanup", "/scan", "/schedule", "/settings", "/history", "/performance", "/health"];
 const FALLBACK_ROUTE: &str = "/dashboard";
 const USER_INFO_ROUTE_KEY: &str = "route";
 /// Event name the frontend listens for when a click arrives while the app's
@@ -138,22 +138,7 @@ pub fn print_authorization_status() {
         println!("[notification-permission] no real .app bundle (dev build) — UNUserNotificationCenter is unusable here, status is meaningless");
         return;
     }
-    let center = UNUserNotificationCenter::currentNotificationCenter();
-    let status = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(-1));
-    let status_writer = status.clone();
-    let handler = block2::RcBlock::new(move |settings: std::ptr::NonNull<objc2_user_notifications::UNNotificationSettings>| {
-        let settings = unsafe { settings.as_ref() };
-        status_writer.store(settings.authorizationStatus().0 as i64, std::sync::atomic::Ordering::SeqCst);
-    });
-    center.getNotificationSettingsWithCompletionHandler(&handler);
-
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(3000);
-    while std::time::Instant::now() < deadline && status.load(std::sync::atomic::Ordering::SeqCst) == -1 {
-        let mode = unsafe { objc2_core_foundation::kCFRunLoopDefaultMode };
-        CFRunLoop::run_in_mode(mode, 0.05, false);
-    }
-
-    let raw = status.load(std::sync::atomic::Ordering::SeqCst);
+    let raw = authorization_status().unwrap_or(-1);
     let label = match raw {
         0 => "notDetermined (never asked / user hasn't responded)",
         1 => "denied",
@@ -164,8 +149,79 @@ pub fn print_authorization_status() {
         _ => "unknown",
     };
     println!("[notification-permission] UNAuthorizationStatus = {raw} ({label})");
+    if let Some([_, alert, center, style]) = notification_settings() {
+        println!("[notification-permission] alertSetting = {alert}, notificationCenterSetting = {center}, alertStyle = {style} (settings: 0 notSupported, 1 disabled, 2 enabled; style: 0 none, 1 banner, 2 alert)");
+    }
     if raw == -1 {
         std::process::exit(1);
+    }
+}
+
+/// The real, current `UNAuthorizationStatus` raw value for this bundle
+/// (0 notDetermined, 1 denied, 2 authorized, 3 provisional, 4 ephemeral).
+/// `None` in a dev build (no real bundle) or if the system never answered
+/// within 3s. Read-only — never prompts.
+pub fn authorization_status() -> Option<i64> {
+    notification_settings().map(|s| s[0])
+}
+
+/// Raw `[authorizationStatus, alertSetting, notificationCenterSetting,
+/// alertStyle]` for this bundle, or `None` in a dev build / on timeout.
+/// Setting values: 0 notSupported, 1 disabled, 2 enabled. Alert style:
+/// 0 none, 1 banner, 2 alert.
+pub fn notification_settings() -> Option<[i64; 4]> {
+    if !has_real_app_bundle() {
+        return None;
+    }
+    let center = UNUserNotificationCenter::currentNotificationCenter();
+    let values = std::sync::Arc::new(std::sync::Mutex::new(None::<[i64; 4]>));
+    let writer = values.clone();
+    let handler = block2::RcBlock::new(move |settings: std::ptr::NonNull<objc2_user_notifications::UNNotificationSettings>| {
+        let settings = unsafe { settings.as_ref() };
+        *writer.lock().unwrap() = Some([
+            settings.authorizationStatus().0 as i64,
+            settings.alertSetting().0 as i64,
+            settings.notificationCenterSetting().0 as i64,
+            settings.alertStyle().0 as i64,
+        ]);
+    });
+    center.getNotificationSettingsWithCompletionHandler(&handler);
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(3000);
+    while std::time::Instant::now() < deadline && values.lock().unwrap().is_none() {
+        let mode = unsafe { objc2_core_foundation::kCFRunLoopDefaultMode };
+        CFRunLoop::run_in_mode(mode, 0.05, false);
+    }
+    let result = *values.lock().unwrap();
+    result
+}
+
+/// Asks for authorization and waits (up to 60s, for the user to answer the
+/// system prompt) for the result. Only prompts if macOS hasn't recorded an
+/// answer yet — otherwise returns the existing decision immediately.
+/// `None` in a dev build or on timeout.
+pub fn request_authorization_blocking() -> Option<bool> {
+    if !has_real_app_bundle() {
+        return None;
+    }
+    let center = UNUserNotificationCenter::currentNotificationCenter();
+    let result = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(-1));
+    let writer = result.clone();
+    let handler = block2::RcBlock::new(move |granted: Bool, _error: *mut NSError| {
+        writer.store(granted.as_bool() as i64, std::sync::atomic::Ordering::SeqCst);
+    });
+    center.requestAuthorizationWithOptions_completionHandler(
+        UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
+        &handler,
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < deadline && result.load(std::sync::atomic::Ordering::SeqCst) == -1 {
+        let mode = unsafe { objc2_core_foundation::kCFRunLoopDefaultMode };
+        CFRunLoop::run_in_mode(mode, 0.05, false);
+    }
+    match result.load(std::sync::atomic::Ordering::SeqCst) {
+        -1 => None,
+        v => Some(v == 1),
     }
 }
 

@@ -9,24 +9,14 @@ import { CleanupItemRow } from '@/components/cleanup/CleanupItemRow'
 import { useAppStore } from '@/store/useAppStore'
 import { FolderOpen } from 'lucide-react'
 import type { FileKind } from '@/types'
+import { useI18n } from '@/i18n'
 
-const TABS: { key: FileKind; label: string }[] = [
-  { key: 'large', label: 'Large Files' },
-  { key: 'old', label: 'Old Files' },
-  { key: 'download', label: 'Downloads' },
-  { key: 'installer', label: 'Installers' },
-  { key: 'archive', label: 'Archives' },
-  { key: 'duplicate', label: 'Duplicates' },
-]
+const TABS: FileKind[] = ['large', 'old', 'download', 'installer', 'archive', 'duplicate']
 
 type SortKey = 'size' | 'age' | 'name'
 
 // Decimal, matching src/lib/format.ts's display units.
-const SIZE_THRESHOLDS = [
-  { label: '> 500 MB', bytes: 500 * 1000 ** 2 },
-  { label: '> 1 GB', bytes: 1000 ** 3 },
-  { label: '> 5 GB', bytes: 5 * 1000 ** 3 },
-]
+const SIZE_THRESHOLDS = [500 * 1000 ** 2, 1000 ** 3, 5 * 1000 ** 3]
 
 const AGE_THRESHOLDS = [30, 60, 90, 180]
 
@@ -38,6 +28,7 @@ export function Files() {
   const [sortKey, setSortKey] = useState<SortKey>('size')
   const [sizeThreshold, setSizeThreshold] = useState(0)
   const [ageThreshold, setAgeThreshold] = useState(0)
+  const { t, fmt } = useI18n()
 
   function setTab(tab: FileKind) {
     setParams({ tab })
@@ -59,33 +50,34 @@ export function Files() {
   return (
     <div className="space-y-5 pb-16">
       <PageHeader
-        title="Files & Downloads"
-        description="Large and old files, Downloads, installers, archives, and checksum-detected duplicates — reviewed before anything moves to Trash."
+        title={t('files.title')}
+        description={t('files.description')}
       />
 
       <div className="flex flex-wrap gap-2 border-b border-border pb-3">
         {TABS.map((tab) => (
           <button
-            key={tab.key}
-            onClick={() => setTab(tab.key)}
+            key={tab}
+            onClick={() => setTab(tab)}
             className={clsx(
               'rounded-full border px-3 py-1.5 text-[12px] font-medium transition-colors',
-              activeTab === tab.key ? 'border-accent bg-accent-soft text-accent' : 'border-border text-text-muted hover:text-text',
+              activeTab === tab ? 'border-accent bg-accent-soft text-accent' : 'border-border text-text-muted hover:text-text',
             )}
           >
-            {tab.label}
+            {t(`files.tab.${tab}`)}
           </button>
         ))}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 sm:max-w-xs">
-          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-faint" />
+          <Search size={13} className="absolute start-2.5 top-1/2 -translate-y-1/2 text-text-faint" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search filenames…"
-            className="w-full rounded-lg border border-border bg-surface py-1.5 pl-8 pr-3 text-[12px] text-text placeholder:text-text-faint"
+            placeholder={t('files.search')}
+            aria-label={t('files.search')}
+            className="w-full rounded-lg border border-border bg-surface py-1.5 ps-8 pe-3 text-[12px] text-text placeholder:text-text-faint"
           />
         </div>
 
@@ -94,9 +86,9 @@ export function Files() {
           onChange={(e) => setSortKey(e.target.value as SortKey)}
           className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[12px] text-text-muted"
         >
-          <option value="size">Sort: Size</option>
-          <option value="age">Sort: Age</option>
-          <option value="name">Sort: Name</option>
+          <option value="size">{t('files.sort.size')}</option>
+          <option value="age">{t('files.sort.age')}</option>
+          <option value="name">{t('files.sort.name')}</option>
         </select>
 
         {activeTab === 'large' && (
@@ -105,10 +97,10 @@ export function Files() {
             onChange={(e) => setSizeThreshold(Number(e.target.value))}
             className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[12px] text-text-muted"
           >
-            <option value={0}>Any size</option>
-            {SIZE_THRESHOLDS.map((t) => (
-              <option key={t.bytes} value={t.bytes}>
-                {t.label}
+            <option value={0}>{t('files.anySize')}</option>
+            {SIZE_THRESHOLDS.map((bytes) => (
+              <option key={bytes} value={bytes}>
+                {t('files.over', { size: fmt.bytes(bytes, 0) })}
               </option>
             ))}
           </select>
@@ -120,10 +112,10 @@ export function Files() {
             onChange={(e) => setAgeThreshold(Number(e.target.value))}
             className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[12px] text-text-muted"
           >
-            <option value={0}>Any age</option>
+            <option value={0}>{t('files.anyAge')}</option>
             {AGE_THRESHOLDS.map((d) => (
               <option key={d} value={d}>
-                {d}+ days
+                {t('files.daysPlus', { days: fmt.number(d) })}
               </option>
             ))}
           </select>
@@ -133,7 +125,7 @@ export function Files() {
       <Card className="overflow-hidden">
         {items.length === 0 ? (
           <CardBody>
-            <EmptyState icon={FolderOpen} title="Nothing here" description="Try clearing filters or search." />
+            <EmptyState icon={FolderOpen} title={t('files.emptyTitle')} description={t('files.emptyBody')} />
           </CardBody>
         ) : (
           items.map((item) => <CleanupItemRow key={item.id} item={item} />)

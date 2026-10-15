@@ -41,6 +41,7 @@ import type {
   ScanProgressUpdate,
   StorageService,
 } from './storageServiceTypes'
+import { DEFAULT_PERFORMANCE_SETTINGS, normalizeSettings } from '@/lib/settingsDefaults'
 
 /** Old browser-localStorage key, from before settings/schedule/history moved to a Rust-backed file (see state.rs) — read once, for migration only. */
 const LEGACY_STORAGE_KEY = 'mac-storage-manager:tauri:v1'
@@ -58,6 +59,8 @@ const DEFAULT_SETTINGS: Settings = {
   exclusions: [],
   notificationsEnabled: true,
   analyticsOptIn: false,
+  language: 'system',
+  performance: DEFAULT_PERFORMANCE_SETTINGS,
 }
 
 const DEFAULT_SCHEDULE: ScheduleRule = {
@@ -101,7 +104,7 @@ async function loadPersisted(): Promise<PersistedRealState> {
 
   if (raw && (raw.settings || raw.schedule || raw.history)) {
     return {
-      settings: { ...DEFAULT_SETTINGS, ...raw.settings },
+      settings: normalizeSettings(raw.settings, DEFAULT_SETTINGS),
       schedule: { ...DEFAULT_SCHEDULE, ...raw.schedule },
       history: raw.history ?? [],
       scanEvents: raw.scanEvents ?? [],
@@ -111,7 +114,7 @@ async function loadPersisted(): Promise<PersistedRealState> {
   // Nothing in the new store yet — check the legacy localStorage key.
   const legacy = readLegacyLocalStorage()
   if (legacy) {
-    const settings = legacy.settings ?? DEFAULT_SETTINGS
+    const settings = normalizeSettings(legacy.settings, DEFAULT_SETTINGS)
     // Even-older migration this file already handled: a top-level
     // `exclusions` array disconnected from `settings.exclusions`.
     const legacyExclusions = (legacy as { exclusions?: string[] }).exclusions

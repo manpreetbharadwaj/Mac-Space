@@ -1,19 +1,17 @@
 import type { SafetyLevel } from '@/types'
 import { clsx } from 'clsx'
+import { useI18n } from '@/i18n'
 
-const CONFIG: Record<SafetyLevel, { label: string; dot: string; classes: string }> = {
+const CONFIG: Record<SafetyLevel, { dot: string; classes: string }> = {
   green: {
-    label: 'Safe',
     dot: 'bg-safe',
     classes: 'bg-safe-soft text-safe',
   },
   orange: {
-    label: 'Review',
     dot: 'bg-review',
     classes: 'bg-review-soft text-review',
   },
   red: {
-    label: 'Protected',
     dot: 'bg-protected',
     classes: 'bg-protected-soft text-protected',
   },
@@ -21,6 +19,7 @@ const CONFIG: Record<SafetyLevel, { label: string; dot: string; classes: string 
 
 export function SafetyBadge({ level, className }: { level: SafetyLevel; className?: string }) {
   const config = CONFIG[level]
+  const { t } = useI18n()
   return (
     <span
       className={clsx(
@@ -30,7 +29,7 @@ export function SafetyBadge({ level, className }: { level: SafetyLevel; classNam
       )}
     >
       <span className={clsx('h-1.5 w-1.5 rounded-full', config.dot)} />
-      {config.label}
+      {t(`safety.${level}`)}
     </span>
   )
 }

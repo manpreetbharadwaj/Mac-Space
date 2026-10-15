@@ -1,5 +1,6 @@
 import type { ScheduleRule, Settings } from '@/types'
 import { daysAgoIso } from '@/lib/format'
+import { DEFAULT_PERFORMANCE_SETTINGS } from '@/lib/settingsDefaults'
 
 const now = new Date()
 const nextRun = new Date(now)
@@ -25,4 +26,6 @@ export const defaultSettings: Settings = {
   exclusions: ['~/Projects/active-client-app', '~/Library/Application Support/1Password'],
   notificationsEnabled: true,
   analyticsOptIn: false,
+  language: 'system',
+  performance: DEFAULT_PERFORMANCE_SETTINGS,
 }

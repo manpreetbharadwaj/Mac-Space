@@ -8,16 +8,11 @@ import { PremiumSwitch } from '@/components/ui/PremiumSwitch'
 import { SystemSettingsAction } from '@/components/ui/SystemSettingsAction'
 import { Modal } from '@/components/ui/Modal'
 import { useAppStore } from '@/store/useAppStore'
-import { formatBytes, formatDateTime } from '@/lib/format'
-import { CATEGORY_LABELS, DASHBOARD_CATEGORY_ORDER } from '@/mocks'
+import { useI18n } from '@/i18n'
+import { DASHBOARD_CATEGORY_ORDER } from '@/mocks'
 import type { ScheduleFrequency, ScheduleMode, ScheduleRule, StorageCategoryId } from '@/types'
 
-const FREQUENCIES: { key: ScheduleFrequency; label: string }[] = [
-  { key: 'daily', label: 'Daily' },
-  { key: 'weekly', label: 'Weekly' },
-  { key: 'biweekly', label: 'Biweekly' },
-  { key: 'monthly', label: 'Monthly' },
-]
+const FREQUENCIES: ScheduleFrequency[] = ['daily', 'weekly', 'biweekly', 'monthly']
 
 /**
  * Must match src-tauri/src/auto_clean.rs's `POLICY_VERSION`. The background
@@ -41,6 +36,7 @@ export function Schedule() {
   const [draft, setDraft] = useState<ScheduleRule | null>(schedule)
   const [dirty, setDirty] = useState(false)
   const [showAutoCleanConsent, setShowAutoCleanConsent] = useState(false)
+  const { t, fmt } = useI18n()
 
   useEffect(() => {
     if (schedule && !dirty) setDraft(schedule)
@@ -86,46 +82,43 @@ export function Schedule() {
   return (
     <div className="max-w-2xl space-y-5 pb-16">
       <PageHeader
-        title="Schedule & Reminders"
-        description="No surprise automation — scheduled cleanups always state exactly what categories are allowed."
+        title={t('sched.title')}
+        description={t('sched.description')}
       />
 
       <Card>
         <CardBody className="flex items-center justify-between">
           <div>
-            <p className="text-[13px] font-medium text-text">Scheduled scans</p>
-            <p className="text-[12px] text-text-muted">
-              Turn on automatic scanning on a recurring cadence — runs in the background via a macOS LaunchAgent, even
-              if the app window is closed.
-            </p>
+            <p className="text-[13px] font-medium text-text">{t('sched.scans')}</p>
+            <p className="text-[12px] text-text-muted">{t('sched.scansHint')}</p>
           </div>
-          <PremiumSwitch checked={draft.enabled} onChange={(v) => update({ enabled: v })} label="Scheduled scans" />
+          <PremiumSwitch checked={draft.enabled} onChange={(v) => update({ enabled: v })} label={t('sched.scans')} />
         </CardBody>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Frequency & time</CardTitle>
+          <CardTitle>{t('sched.frequencyTitle')}</CardTitle>
         </CardHeader>
         <CardBody className="space-y-4">
           <div className="flex flex-wrap gap-2">
             {FREQUENCIES.map((f) => (
               <button
-                key={f.key}
-                onClick={() => update({ frequency: f.key })}
+                key={f}
+                onClick={() => update({ frequency: f })}
                 className={clsx(
                   'rounded-full border px-3.5 py-1.5 text-[12px] font-medium transition-colors',
-                  draft.frequency === f.key
+                  draft.frequency === f
                     ? 'border-accent bg-accent-soft text-accent'
                     : 'border-border text-text-muted hover:text-text',
                 )}
               >
-                {f.label}
+                {t(`sched.freq.${f}`)}
               </button>
             ))}
           </div>
           <div className="flex items-center justify-between gap-4 border-t border-border pt-4">
-            <p className="text-[13px] text-text-muted">Run at</p>
+            <p className="text-[13px] text-text-muted">{t('sched.runAt')}</p>
             <input
               type="time"
               value={draft.timeOfDay}
@@ -135,7 +128,7 @@ export function Schedule() {
           </div>
           {draft.frequency === 'biweekly' && (
             <p className="text-[11px] text-text-faint">
-              Biweekly runs on the same weekday as weekly, but skip every other occurrence.
+              {t('sched.biweeklyNote')}
             </p>
           )}
         </CardBody>
@@ -143,24 +136,20 @@ export function Schedule() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Mode</CardTitle>
+          <CardTitle>{t('sched.mode')}</CardTitle>
         </CardHeader>
         <CardBody className="space-y-3">
           {(
             [
-              { key: 'reminder' as ScheduleMode, label: 'Reminder only', desc: 'Scans your Mac and lets you know when storage needs attention.' },
-              {
-                key: 'auto-clean' as ScheduleMode,
-                label: 'Auto-clean Safe items',
-                desc: 'Automatically moves only strictly approved cache and build data to Trash. Personal files and review items are never removed automatically.',
-              },
+              { key: 'reminder' as ScheduleMode, label: t('sched.reminder'), desc: t('sched.reminderDesc') },
+              { key: 'auto-clean' as ScheduleMode, label: t('sched.autoClean'), desc: t('sched.autoCleanDesc') },
             ] as const
           ).map((opt) => (
             <button
               key={opt.key}
               onClick={() => selectMode(opt.key)}
               className={clsx(
-                'flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors',
+                'flex w-full items-start gap-3 rounded-xl border p-3 text-start transition-colors',
                 draft.mode === opt.key ? 'border-accent bg-accent-soft' : 'border-border hover:bg-surface-2',
               )}
             >
@@ -181,22 +170,16 @@ export function Schedule() {
             <div className="rounded-xl border border-safe/40 bg-safe-soft/40 p-3">
               <p className="mb-1.5 flex items-center gap-1.5 text-[12px] font-medium text-text">
                 <ShieldCheck size={13} className="text-safe" />
-                Strict auto-clean allowlist — verified natively, not just labeled "safe"
+                {t('sched.allowlistTitle')}
               </p>
-              <p className="text-[11px] text-text-faint">
-                Only independently-verified, regenerable developer caches are ever eligible: Xcode DerivedData, npm,
-                Yarn, pnpm, Gradle, and CocoaPods caches. Downloads, Documents, Desktop files, browser data, large or
-                old files, duplicates, and anything else — including items merely labeled "Safe" elsewhere in this
-                app — are never auto-cleaned. Exclusions are always respected, files go to Trash (never permanently
-                deleted), and a summary notification is sent after each run.
-              </p>
+              <p className="text-[11px] text-text-faint">{t('sched.allowlistBody')}</p>
             </div>
           )}
 
           <div className="rounded-xl border border-border p-3">
             <p className="mb-2 flex items-center gap-1.5 text-[12px] font-medium text-text">
               <ShieldCheck size={13} className="text-text-faint" />
-              Categories considered for the reclaimable-space notification
+              {t('sched.categoriesTitle')}
             </p>
             <div className="flex flex-wrap gap-2">
               {DASHBOARD_CATEGORY_ORDER.map((id) => (
@@ -210,13 +193,12 @@ export function Schedule() {
                       : 'border-border text-text-muted hover:text-text',
                   )}
                 >
-                  {CATEGORY_LABELS[id]}
+                  {t(`cat.${id}`)}
                 </button>
               ))}
             </div>
             <p className="mt-2 text-[11px] text-text-faint">
-              This only affects the "you might want to review storage" estimate — it is not the auto-clean allowlist
-              above, and does not change what auto-clean is allowed to touch.
+              {t('sched.categoriesNote')}
             </p>
           </div>
         </CardBody>
@@ -225,42 +207,39 @@ export function Schedule() {
       <Modal
         open={showAutoCleanConsent}
         onClose={() => setShowAutoCleanConsent(false)}
-        title="Turn on Auto-clean Safe items?"
+        title={t('sched.consentTitle')}
         footer={
           <>
             <Button variant="secondary" onClick={() => setShowAutoCleanConsent(false)}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button variant="primary" onClick={confirmAutoCleanConsent}>
-              Enable Auto-clean
+              {t('sched.consentEnable')}
             </Button>
           </>
         }
       >
         <ul className="space-y-2 text-[13px] text-text">
-          <li>• Only strict, independently-verified cache and build data is eligible — see the allowlist above.</li>
-          <li>• Files are moved to the macOS Trash, never permanently deleted.</li>
-          <li>• Personal files (Documents, Desktop, Downloads, media, browser data) are never auto-cleaned.</li>
-          <li>• Your exclusions are always respected.</li>
-          <li>• Anything marked Review or Protected is never auto-cleaned.</li>
-          <li>• A summary notification is sent after each run that actually cleans something.</li>
+          {(['sched.consent1', 'sched.consent2', 'sched.consent3', 'sched.consent4', 'sched.consent5', 'sched.consent6'] as const).map((k) => (
+            <li key={k}>• {t(k)}</li>
+          ))}
         </ul>
       </Modal>
 
       <Card>
         <CardHeader>
-          <CardTitle>Notifications</CardTitle>
+          <CardTitle>{t('sched.notifTitle')}</CardTitle>
         </CardHeader>
         <CardBody className="space-y-4">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <p className="text-[13px] font-medium text-text">Enable notifications</p>
-              <p className="text-[12px] text-text-muted">Required for scheduled scans to alert you at all.</p>
+              <p className="text-[13px] font-medium text-text">{t('sched.enable')}</p>
+              <p className="text-[12px] text-text-muted">{t('sched.enableHint')}</p>
             </div>
             <PremiumSwitch
               checked={settings.notificationsEnabled}
               onChange={(v) => saveSettings({ ...settings, notificationsEnabled: v })}
-              label="Enable notifications"
+              label={t('sched.enable')}
             />
           </div>
 
@@ -273,69 +252,68 @@ export function Schedule() {
               ) : (
                 <Bell size={14} className="text-text-faint" />
               )}
-              macOS permission:{' '}
+              {t('sched.permission')}{' '}
               <span className="font-medium text-text">
                 {notificationPermission === 'granted'
-                  ? 'Granted'
+                  ? t('sched.granted')
                   : notificationPermission === 'denied'
-                    ? 'Denied'
-                    : 'Not yet requested'}
+                    ? t('sched.denied')
+                    : t('sched.notRequested')}
               </span>
             </p>
             <div className="flex shrink-0 gap-2">
               {notificationPermission !== 'granted' && (
                 <Button size="sm" variant="secondary" onClick={requestNotificationPermission}>
-                  Enable Notifications
+                  {t('sched.enableBtn')}
                 </Button>
               )}
-              <SystemSettingsAction label="Open Notification Settings" onClick={openNotificationSettings} />
+              <SystemSettingsAction label={t('settings.openNotificationSettings')} onClick={openNotificationSettings} />
             </div>
           </div>
           <p className="text-[11px] text-text-faint">
-            macOS doesn't always let apps see whether notifications were actually denied — if a reminder never
-            appears, use "Open Notification Settings" to check directly in System Settings.
+            {t('sched.notifNote')}
           </p>
         </CardBody>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Notification thresholds</CardTitle>
+          <CardTitle>{t('sched.thresholdsTitle')}</CardTitle>
         </CardHeader>
         <CardBody className="space-y-4">
           <div className="flex items-center justify-between gap-4">
             <p className="flex items-center gap-1.5 text-[13px] text-text-muted">
-              <Bell size={13} /> Notify when free space drops below
+              <Bell size={13} /> {t('sched.freeBelow')}
             </p>
             <div className="flex items-center gap-1.5">
               <input
                 type="number"
                 value={draft.thresholdFreeGb}
                 onChange={(e) => update({ thresholdFreeGb: Number(e.target.value) })}
-                className="w-16 rounded-lg border border-border bg-surface px-2 py-1 text-right text-[13px] text-text"
+                className="w-16 rounded-lg border border-border bg-surface px-2 py-1 text-end text-[13px] text-text"
               />
-              <span className="text-[12px] text-text-muted">GB</span>
+              <span className="text-[12px] text-text-muted">{t('sched.gb')}</span>
             </div>
           </div>
           <div className="flex items-center justify-between gap-4">
             <p className="flex items-center gap-1.5 text-[13px] text-text-muted">
-              <Bell size={13} /> Notify when reclaimable space exceeds
+              <Bell size={13} /> {t('sched.reclaimAbove')}
             </p>
             <div className="flex items-center gap-1.5">
               <input
                 type="number"
                 value={draft.thresholdReclaimableGb}
                 onChange={(e) => update({ thresholdReclaimableGb: Number(e.target.value) })}
-                className="w-16 rounded-lg border border-border bg-surface px-2 py-1 text-right text-[13px] text-text"
+                className="w-16 rounded-lg border border-border bg-surface px-2 py-1 text-end text-[13px] text-text"
               />
-              <span className="text-[12px] text-text-muted">GB</span>
+              <span className="text-[12px] text-text-muted">{t('sched.gb')}</span>
             </div>
           </div>
           <div className="flex items-center justify-between gap-4 border-t border-border pt-3 opacity-60">
             <p className="flex items-center gap-1.5 text-[13px] text-text-muted">
-              <Mail size={13} /> Weekly email summary
+              <Mail size={13} /> {t('sched.email')}
             </p>
-            <span className="rounded-full bg-surface-2 px-2.5 py-1 text-[11px] text-text-faint">Coming later</span>
+            <span className="rounded-full bg-surface-2 px-2.5 py-1 text-[11px] text-text-faint">{t('sched.comingLater')}</span>
           </div>
         </CardBody>
       </Card>
@@ -343,18 +321,18 @@ export function Schedule() {
       <Card>
         <CardBody className="space-y-2 text-[12px] text-text-muted">
           <div className="flex items-center justify-between">
-            <span>Last run</span>
-            <span className="font-medium text-text">{draft.lastRunAt ? formatDateTime(draft.lastRunAt) : 'Never'}</span>
+            <span>{t('sched.lastRun')}</span>
+            <span className="font-medium text-text">{draft.lastRunAt ? fmt.dateTimeIso(draft.lastRunAt) : t('sched.never')}</span>
           </div>
           <div className="flex items-center justify-between">
-            <span>Next run</span>
+            <span>{t('sched.nextRun')}</span>
             <span className="font-medium text-text">
-              {draft.enabled && draft.nextRunAt ? formatDateTime(draft.nextRunAt) : 'Not scheduled'}
+              {draft.enabled && draft.nextRunAt ? fmt.dateTimeIso(draft.nextRunAt) : t('sched.notScheduled')}
             </span>
           </div>
           <div className="flex items-center justify-between border-t border-border pt-2">
             <span className="flex items-center gap-1.5">
-              <Radio size={12} /> Background scheduler
+              <Radio size={12} /> {t('sched.scheduler')}
             </span>
             <span
               className={clsx(
@@ -362,7 +340,7 @@ export function Schedule() {
                 !draft.enabled ? 'text-text-faint' : scheduleInstalled ? 'text-safe' : 'text-protected',
               )}
             >
-              {!draft.enabled ? 'Off' : scheduleInstalled ? 'Active' : 'Not installed — try saving again'}
+              {!draft.enabled ? t('sched.off') : scheduleInstalled ? t('sched.active') : t('sched.notInstalled')}
             </span>
           </div>
         </CardBody>
@@ -371,7 +349,7 @@ export function Schedule() {
       {scanEvents.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Recent scan activity</CardTitle>
+            <CardTitle>{t('sched.recent')}</CardTitle>
           </CardHeader>
           <CardBody className="space-y-2">
             {scanEvents.slice(0, 5).map((event) => (
@@ -380,14 +358,14 @@ export function Schedule() {
                   <HistoryIcon size={13} className="shrink-0 text-text-faint" />
                   <div>
                     <p className="text-[12px] font-medium text-text">
-                      {event.source === 'scheduled' ? 'Scheduled scan' : 'Manual scan'}
+                      {event.source === 'scheduled' ? t('sched.scheduledScan') : t('sched.manualScan')}
                     </p>
-                    <p className="text-[11px] text-text-faint">{formatDateTime(event.occurredAt)} · scan only, nothing cleaned</p>
+                    <p className="text-[11px] text-text-faint">{t('sched.scanOnly', { time: fmt.dateTimeIso(event.occurredAt) })}</p>
                   </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-[12px] font-medium text-text">{formatBytes(event.reclaimableBytes)} reclaimable</p>
-                  {event.notificationSent && <p className="text-[11px] text-safe">Notification sent</p>}
+                <div className="text-end">
+                  <p className="text-[12px] font-medium text-text">{t('sched.reclaimable', { size: fmt.bytes(event.reclaimableBytes) })}</p>
+                  {event.notificationSent && <p className="text-[11px] text-safe">{t('sched.notificationSent')}</p>}
                 </div>
               </div>
             ))}
@@ -404,10 +382,10 @@ export function Schedule() {
             setDirty(false)
           }}
         >
-          Discard
+          {t('sched.discard')}
         </Button>
         <Button variant="primary" disabled={!dirty} onClick={handleSave}>
-          Save schedule
+          {t('sched.save')}
         </Button>
       </div>
     </div>

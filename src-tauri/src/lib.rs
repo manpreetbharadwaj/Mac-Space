@@ -5,14 +5,20 @@ mod browsers;
 mod commands;
 mod dedup;
 mod developer;
+mod device_health;
 mod diagnostics;
 mod disk;
 mod dto;
 mod external_url;
+mod iokit;
+mod login_item;
 mod native_notifications;
+mod performance;
+mod processes;
 mod scanner;
 mod schedule;
 mod state;
+mod sysmetrics;
 mod trash;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -62,6 +68,14 @@ pub fn run() {
         return;
     }
 
+    // Read-only diagnostic: prints the Performance / Mac Health data as JSON
+    // (see commands::print_system_health) for checking against Activity
+    // Monitor and System Information. No window, no side effects.
+    if std::env::args().any(|a| a == "--print-system-health") {
+        commands::print_system_health();
+        return;
+    }
+
     tauri::Builder::default()
         .setup(|app| {
             // Always on (not just in debug builds): a shipped build that
@@ -82,6 +96,9 @@ pub fn run() {
             // for why tauri-plugin-notification alone can't do this.
             native_notifications::install_delegate(app.handle().clone());
             native_notifications::request_authorization();
+            // Parked until the frontend sends its settings
+            // (configure_performance_monitor) — no sampling before that.
+            performance::start();
             Ok(())
         })
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -105,6 +122,22 @@ pub fn run() {
             commands::open_notification_settings,
             commands::open_external_url,
             commands::get_pending_notification_route,
+            commands::configure_performance_monitor,
+            commands::set_performance_view_active,
+            commands::get_performance_snapshot,
+            commands::get_running_processes,
+            commands::get_process_details,
+            commands::terminate_process,
+            commands::get_app_icons,
+            commands::get_device_info,
+            commands::reveal_serial_number,
+            commands::get_storage_health,
+            commands::get_battery_health,
+            commands::get_native_notification_status,
+            commands::send_test_notification,
+            commands::get_login_item_status,
+            commands::set_login_item_enabled,
+            commands::open_login_items_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

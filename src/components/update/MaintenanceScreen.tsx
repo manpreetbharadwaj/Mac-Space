@@ -1,5 +1,6 @@
 import { Wrench } from 'lucide-react'
 import { useUpdateStore } from '@/store/useUpdateStore'
+import { useI18n } from '@/i18n'
 
 /**
  * Full-app takeover shown only when Remote Config's maintenance_mode is true
@@ -10,6 +11,7 @@ import { useUpdateStore } from '@/store/useUpdateStore'
  */
 export function MaintenanceScreen() {
   const remoteConfig = useUpdateStore((s) => s.remoteConfig)
+  const { t } = useI18n()
 
   return (
     <div className="flex h-screen w-full items-center justify-center bg-canvas px-6 text-text">
@@ -17,9 +19,9 @@ export function MaintenanceScreen() {
         <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-review-soft text-review">
           <Wrench size={22} />
         </div>
-        <h1 className="text-[17px] font-semibold text-text">{remoteConfig.maintenance_title || 'Under Maintenance'}</h1>
+        <h1 className="text-[17px] font-semibold text-text">{remoteConfig.maintenance_title || t('maint.title')}</h1>
         <p className="text-[13px] text-text-muted">
-          {remoteConfig.maintenance_message || 'Mac Storage Manager is temporarily unavailable. Please try again shortly.'}
+          {remoteConfig.maintenance_message || t('maint.body')}
         </p>
       </div>
     </div>

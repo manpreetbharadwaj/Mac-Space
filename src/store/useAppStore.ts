@@ -19,6 +19,7 @@ import { storageService, type CleanMode } from '@/services/storageService'
 import type { CleanupProgressUpdate, ScanProgressUpdate } from '@/services/storageServiceTypes'
 import { dataSource, type DataSource } from '@/services/environment'
 import { createInitStepsDone, type InitStepKey } from '@/lib/startupStages'
+import { resolveLanguage, translate, translatePlural, type MessageKey, type PluralKey, type TranslateVars } from '@/i18n/core'
 
 export interface Toast {
   id: string
@@ -84,6 +85,14 @@ interface AppState {
 }
 
 let toastCounter = 0
+
+/** Toast text in the user's chosen language (the store isn't a component, so no hook). */
+function tt(key: MessageKey, vars?: TranslateVars): string {
+  return translate(resolveLanguage(useAppStore.getState().settings?.language), key, vars)
+}
+function ttp(key: PluralKey, count: number): string {
+  return translatePlural(resolveLanguage(useAppStore.getState().settings?.language), key, count)
+}
 
 async function refreshCore(set: (partial: Partial<AppState>) => void) {
   const [diskSummary, categories, cleanupItems] = await Promise.all([
@@ -252,15 +261,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
 
     if (failures.length > 0) {
-      get().pushToast(
-        `Moved ${successIds.length} item${successIds.length === 1 ? '' : 's'} to Trash — ${failures.length} failed.`,
-        'warning',
-      )
+      get().pushToast(tt('toast.movedFailed', { items: ttp('items', successIds.length), failed: failures.length }), 'warning')
     } else {
-      get().pushToast(
-        `Cleaned ${result.session.itemCount} item${result.session.itemCount === 1 ? '' : 's'} — space reclaimed.`,
-        'success',
-      )
+      get().pushToast(tt('toast.cleaned', { items: ttp('items', result.session.itemCount) }), 'success')
     }
   },
 
@@ -276,29 +279,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     const settings = await storageService.getSettings()
     set({ settings })
     await refreshCore(set)
-    get().pushToast('Item excluded — it will no longer appear in recommendations.', 'default')
+    get().pushToast(tt('toast.excluded'), 'default')
   },
 
   revealInFinder: async (path) => {
     await storageService.revealInFinder(path)
-    get().pushToast(`Revealed "${path}" in Finder (simulated).`, 'default')
+    // Real in the desktop app; only the browser prototype simulates it.
+    get().pushToast(get().dataSource === 'tauri' ? tt('toast.revealed') : tt('toast.revealedSimulated'), 'default')
   },
 
   uninstallApp: async (id) => {
     const applications = await storageService.uninstallApp(id)
     set({ applications })
     await refreshCore(set)
-    get().pushToast('App uninstalled (simulated) — no real application was changed.', 'success')
+    get().pushToast(tt('toast.uninstalledSimulated'), 'success')
   },
 
   saveSchedule: async (rule) => {
     const schedule = await storageService.saveSchedule(rule)
     const scheduleInstalled = await storageService.getScheduleStatus()
     set({ schedule, scheduleInstalled })
-    get().pushToast(
-      schedule.enabled ? 'Schedule saved — background scans are on.' : 'Scheduled scans turned off.',
-      'success',
-    )
+    get().pushToast(schedule.enabled ? tt('toast.scheduleOn') : tt('toast.scheduleOff'), 'success')
   },
 
   refreshScanEvents: async () => {
@@ -327,13 +328,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   requestPermission: async (category) => {
     const permissions = await storageService.requestPermission(category)
     set({ permissions })
-    get().pushToast('Permission granted (simulated).', 'success')
+    // The desktop app can only open System Settings — the user grants access there.
+    get().pushToast(get().dataSource === 'tauri' ? tt('toast.permissionOpened') : tt('toast.permissionSimulated'), get().dataSource === 'tauri' ? 'default' : 'success')
   },
 
   resetDemoData: async () => {
     await storageService.resetDemoData()
     await get().init()
-    get().pushToast('Demo data reset.', 'default')
+    get().pushToast(tt('toast.demoReset'), 'default')
   },
 
   pushToast: (message, tone = 'default') => {

@@ -170,12 +170,60 @@ export interface ScanEvent {
 
 export type ThemePreference = 'light' | 'dark' | 'system'
 
+/** The 16 supported UI languages — see src/i18n/languages.ts. */
+export type LanguageCode =
+  | 'en'
+  | 'de'
+  | 'fr'
+  | 'es'
+  | 'it'
+  | 'pt'
+  | 'nl'
+  | 'hi'
+  | 'ja'
+  | 'ko'
+  | 'zh-Hans'
+  | 'zh-Hant'
+  | 'ar'
+  | 'tr'
+  | 'ru'
+  | 'id'
+
+/** 'system' follows the macOS preferred language order (detected at launch). */
+export type LanguagePreference = 'system' | LanguageCode
+
+export type AlertSensitivity = 'low' | 'balanced' | 'high'
+
+/**
+ * Performance monitoring + alert preferences. Mirrored to the native
+ * monitor (src-tauri/src/performance.rs `MonitorConfig`) by
+ * usePerformanceMonitorSync whenever they change.
+ */
+export interface PerformanceSettings {
+  monitoringEnabled: boolean
+  refreshIntervalSec: number
+  memoryAlert: boolean
+  cpuAlert: boolean
+  appAlert: boolean
+  storageAlert: boolean
+  batteryAlert: boolean
+  sensitivity: AlertSensitivity
+  cpuThresholdPercent: number
+  appMemoryThresholdGb: number
+  storageFreeThresholdGb: number
+  cooldownMinutes: number
+}
+
 export interface Settings {
   theme: ThemePreference
   permanentDeleteEnabled: boolean
   exclusions: string[]
   notificationsEnabled: boolean
   analyticsOptIn: boolean
+  /** Missing on settings persisted before localization existed — see normalizeSettings. */
+  language: LanguagePreference
+  /** Missing on settings persisted before performance monitoring existed — see normalizeSettings. */
+  performance: PerformanceSettings
 }
 
 export type BrowserId = 'safari' | 'chrome' | 'firefox' | 'edge' | 'arc'

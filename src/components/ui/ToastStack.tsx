@@ -14,7 +14,7 @@ export function ToastStack() {
   const dismissToast = useAppStore((s) => s.dismissToast)
 
   return (
-    <div className="pointer-events-none fixed bottom-5 right-5 z-[60] flex w-80 flex-col gap-2">
+    <div className="pointer-events-none fixed bottom-5 end-5 z-[60] flex w-80 flex-col gap-2">
       <AnimatePresence>
         {toasts.map((toast) => {
           const Icon = ICONS[toast.tone]

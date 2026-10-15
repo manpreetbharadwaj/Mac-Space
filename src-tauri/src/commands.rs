@@ -334,3 +334,145 @@ pub fn open_notification_settings() -> Result<(), String> {
 pub fn get_pending_notification_route() -> Option<String> {
     crate::native_notifications::take_pending_route()
 }
+
+// --- Performance & Mac Health — see performance.rs, processes.rs, device_health.rs ---
+
+/// Pushes the user's monitoring/alert preferences (and localized
+/// notification templates) to the native monitor. Called at startup and on
+/// every relevant settings change.
+#[tauri::command]
+pub fn configure_performance_monitor(config: crate::performance::MonitorConfig) {
+    crate::performance::configure(config);
+}
+
+/// Performance screen mounted/unmounted — controls the sampling pace.
+#[tauri::command]
+pub fn set_performance_view_active(active: bool) {
+    crate::performance::set_view_active(active);
+}
+
+/// `None` when monitoring is turned off in Settings.
+#[tauri::command]
+pub async fn get_performance_snapshot() -> Result<Option<crate::performance::PerformanceSnapshotDto>, String> {
+    tauri::async_runtime::spawn_blocking(crate::performance::snapshot).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_running_processes() -> Result<crate::processes::ProcessListDto, String> {
+    tauri::async_runtime::spawn_blocking(crate::performance::processes).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_process_details(pid: i32) -> Result<Option<crate::processes::ProcessDetailsDto>, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::processes::details(pid)).await.map_err(|e| e.to_string())
+}
+
+/// User-initiated only (Quit / confirmed Force Quit). `start_time` is the
+/// kernel start time the user saw — see processes.rs's SAFETY invariants.
+#[tauri::command]
+pub async fn terminate_process(pid: i32, start_time: u64, force: bool) -> Result<crate::processes::TerminateResultDto, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::processes::terminate(pid, start_time, force))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Real app icons as PNG data URLs, keyed by pid. AppKit drawing happens on
+/// the main thread.
+#[tauri::command]
+pub async fn get_app_icons(app: AppHandle, pids: Vec<i32>) -> Result<std::collections::HashMap<i32, String>, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let icons: std::collections::HashMap<i32, String> = pids
+            .into_iter()
+            .filter_map(|pid| crate::processes::app_icon_data_url(pid).map(|url| (pid, url)))
+            .collect();
+        let _ = tx.send(icons);
+    })
+    .map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(10)).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn get_device_info() -> Result<crate::device_health::DeviceInfoDto, String> {
+    tauri::async_runtime::spawn_blocking(crate::device_health::device_info).await.map_err(|e| e.to_string())
+}
+
+/// Only invoked by an explicit "Reveal" click. Never logged.
+#[tauri::command]
+pub fn reveal_serial_number() -> Option<String> {
+    crate::device_health::serial_number()
+}
+
+#[tauri::command]
+pub async fn get_storage_health() -> Result<crate::device_health::StorageHealthDto, String> {
+    tauri::async_runtime::spawn_blocking(crate::device_health::storage_health).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_battery_health() -> Result<crate::device_health::BatteryDto, String> {
+    tauri::async_runtime::spawn_blocking(crate::device_health::battery).await.map_err(|e| e.to_string())
+}
+
+/// The real `UNAuthorizationStatus` for this bundle (unlike
+/// `get_notification_permission_state`, which is the plugin's always-granted
+/// desktop answer): "authorized" | "denied" | "notDetermined" |
+/// "provisional" | "ephemeral" | "unavailable" (dev build).
+#[tauri::command]
+pub async fn get_native_notification_status() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| crate::performance::authorization_label(crate::native_notifications::authorization_status()))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn send_test_notification(title: String, body: String) -> Result<crate::performance::TestNotificationResultDto, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::performance::send_test_notification(&title, &body))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_login_item_status() -> crate::login_item::LoginItemStatusDto {
+    crate::login_item::status()
+}
+
+#[tauri::command]
+pub fn set_login_item_enabled(enabled: bool) -> crate::login_item::LoginItemStatusDto {
+    crate::login_item::set_enabled(enabled)
+}
+
+#[tauri::command]
+pub fn open_login_items_settings() {
+    crate::login_item::open_login_items_settings();
+}
+
+/// Diagnostic (`--print-system-health`, see lib.rs): prints exactly what the
+/// Performance and Mac Health screens receive, as JSON, so every value can
+/// be checked against Activity Monitor / System Information. The serial
+/// number is never printed.
+pub fn print_system_health() {
+    let _ = crate::performance::snapshot();
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    crate::performance::configure(crate::performance::MonitorConfig { refresh_interval_ms: 1000, ..Default::default() });
+    let snapshot = crate::performance::snapshot();
+    // Per-process CPU needs three refreshes (see ProcessSampler::first_seen).
+    for _ in 0..2 {
+        let _ = crate::performance::processes();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+    }
+    let mut processes = crate::performance::processes();
+    processes.processes.retain(|p| p.kind == crate::processes::ProcessKind::App);
+    processes.processes.sort_by(|a, b| b.group_memory_bytes.cmp(&a.group_memory_bytes));
+    processes.processes.truncate(8);
+    let report = serde_json::json!({
+        "snapshot": snapshot,
+        "topApps": processes,
+        "device": crate::device_health::device_info(),
+        "storage": crate::device_health::storage_health(),
+        "battery": crate::device_health::battery(),
+        "loginItem": crate::login_item::status(),
+    });
+    println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+}
